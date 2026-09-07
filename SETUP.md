@@ -58,9 +58,14 @@ make up
 
 > **Helm repo URL:** the `kestra-kubectl` skill uses `https://helm.kestra.io/`.
 
-> **Slow first run:** the EE image is large. To pre-warm:
-> `docker pull $KESTRA_IMAGE && kind load docker-image $KESTRA_IMAGE --name $KIND_CLUSTER_NAME`
-> before `make up` — this also sidesteps in-cluster registry auth.
+> **Slow first run:** the EE image is ~3.5 GB and the node pulls it once per
+> component. On a cold node / slow link the first `make up` can sit in
+> "waiting for the webserver" for **20–30 minutes**. The script timeouts
+> (`helm --wait` 40m, rollout waits 40m) allow for this. To pre-warm the host
+> cache: `docker pull $KESTRA_IMAGE` before `make up`.
+> (`kind load docker-image` does *not* work here — Docker Desktop's containerd
+> image store produces an archive kind's `ctr import` rejects — so the node
+> pulls from the registry regardless.)
 
 Expected URLs:
 

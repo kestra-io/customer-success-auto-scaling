@@ -6,7 +6,7 @@ source "$(dirname "$0")/lib.sh"
 load_env
 
 log "waiting for postgres StatefulSet"
-kctl rollout status statefulset/kestra-postgres --timeout=300s
+kctl rollout status statefulset/kestra-postgres --timeout=600s
 
 # indexer is intentionally NOT in this list — it's disabled in helm/values.yaml
 # (only needed with an Elasticsearch backend; postgres repo uses the webserver's
@@ -15,7 +15,9 @@ for c in webserver executor scheduler worker; do
   dep="$(kestra_deploy "$c")"                       # resolve real name by label
   [[ -n "$dep" ]] || die "could not find the '$c' deployment by label"
   log "waiting for deployment/${dep}"
-  kctl rollout status "deployment/${dep}" --timeout=420s
+  # 40m: covers a cold-node EE image pull if `helm --wait` and the webserver
+  # gate in up.sh didn't already absorb it.
+  kctl rollout status "deployment/${dep}" --timeout=2400s
 done
 
 # Sanity-check that the chart actually rendered the worker thread flag we asked

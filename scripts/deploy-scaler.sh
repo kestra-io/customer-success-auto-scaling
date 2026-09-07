@@ -67,7 +67,8 @@ kctl create configmap worker-scaler-config \
   --dry-run=client -o yaml | kctl apply -f -
 
 sed "s/{{NAMESPACE}}/${K8S_NAMESPACE}/g" "$WS1/k8s/deployment.yaml" | kctl apply -f -
-kctl rollout status deploy/worker-scaler --timeout=120s
+# Fast: the image is python:3.12-slim + one file, already `kind load`ed above.
+kctl rollout status deploy/worker-scaler --timeout=180s
 
 ok "scaler deployed. Watch it:  kubectl -n ${K8S_NAMESPACE} logs -f deploy/worker-scaler"
 ok "Now drive load from the trigger app and watch:  kubectl -n ${K8S_NAMESPACE} get deploy ${WORKER_DEPLOYMENT_NAME} -w"

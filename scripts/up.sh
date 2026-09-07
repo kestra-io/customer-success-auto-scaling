@@ -63,19 +63,19 @@ kctl rollout status "deploy/$(kestra_deploy webserver)" --timeout=2400s
 # 7. Port-forwards — steps 8/9/10 all talk to 127.0.0.1:{8080,8082}.
 "$HERE/portforward.sh" start
 
-# 7. Readiness: rollout status for every component + an authenticated API probe.
+# 8. Readiness: rollout status for every component + an authenticated API probe.
 "$HERE/wait-ready.sh"
 
-# 8. Import the workload flow and fire one smoke webhook.
+# 9. Import the workload flow and fire one smoke webhook.
 "$HERE/import-flow.sh"
 
-# 9. Discover + pin the exact worker metric names into .state/metric-names.env.
+# 10. Discover + pin the exact worker metric names into .state/metric-names.env.
 "$HERE/verify-metrics.sh" || warn "metric discovery incomplete — re-run 'make metrics' after a few executions"
 
-# 10. Trigger app (Node container: slider UI + rate loop + /stats).
+# 11. Trigger app (Node container: slider UI + rate loop + /stats).
 log "starting trigger app"
 docker compose -f "$ROOT/app/docker-compose.yml" --env-file "$ROOT/.env" up -d --build
 
-# 11. Print the URLs and next step.
+# 12. Print the URLs and next step.
 "$HERE/urls.sh"
 ok "bring-up complete. Open the trigger app and try the presets. 'make scaler' adds Workstream 1."
