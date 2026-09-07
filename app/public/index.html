@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Kestra Auto-Scaling — Trigger Console</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <main>
+    <h1>Trigger Console</h1>
+    <p class="sub">Fires the <code id="flow-name">…</code> webhook at a controllable rate.
+       Watch <code>pending</code> vs. <code>capacity</code> below.</p>
+
+    <section class="card">
+      <div class="row">
+        <button data-preset="drop">Drop</button>
+        <button data-preset="baseline" class="primary">Baseline</button>
+        <button data-preset="spike">Spike</button>
+      </div>
+      <label class="slider-label">
+        Trigger rate: <strong><span id="rate-val">–</span> / min</strong>
+        <input id="rate" type="range" min="0" max="30" step="2" value="8" />
+      </label>
+      <p class="hint" id="preset-hint"></p>
+    </section>
+
+    <section class="card">
+      <div class="gauge">
+        <div class="bar-track">
+          <div id="bar-running" class="bar bar-running"></div>
+          <div id="bar-pending" class="bar bar-pending"></div>
+        </div>
+        <div class="gauge-legend">
+          <span><i class="sw sw-running"></i> running</span>
+          <span><i class="sw sw-pending"></i> pending (queued)</span>
+          <span class="cap">capacity = <span id="cap">–</span></span>
+        </div>
+      </div>
+      <table class="stats">
+        <tr><th>running</th><td id="s-running">–</td>
+            <th>pending</th><td id="s-pending">–</td></tr>
+        <tr><th>worker replicas</th><td id="s-replicas">–</td>
+            <th>threads / worker</th><td id="s-threads">–</td></tr>
+        <tr><th>utilization</th><td id="s-util">–</td>
+            <th>fired total</th><td id="s-fired">–</td></tr>
+      </table>
+      <p class="hint" id="scrape-err"></p>
+    </section>
+
+    <p class="foot">Numbers lag reality by up to ~30–60&nbsp;s (Kestra re-aggregates worker
+       metrics on a 30&nbsp;s timer). Give each change ~90&nbsp;s to settle.</p>
+  </main>
+  <script src="/app.js"></script>
+</body>
+</html>

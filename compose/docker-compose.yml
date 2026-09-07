@@ -1,0 +1,104 @@
+name: kestra-autoscaling-compose
+
+# Lighter quickstart — NO Kubernetes. Shows the PROBLEM: a single-node Kestra with
+# a fixed 4-thread worker, driven by the trigger app. Hit "Spike" and watch
+# `pending` grow. This path does NOT do live worker scaling (Workstream 1 needs a
+# Deployment to scale) — see ../README.md and ./README.md.
+
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kestra}
+      POSTGRES_USER: ${POSTGRES_USER:-kestra}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-kestraPostgres123}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kestra} -d ${POSTGRES_DB:-kestra}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  kestra:
+    image: ${KESTRA_IMAGE:-registry.kestra.io/docker/kestra-ee:v1.3.24}
+    user: "root"
+    command:
+      - /bin/sh
+      - -c
+      - exec /app/kestra server standalone --worker-thread ${WORKER_THREADS:-4}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      KESTRA_CONFIGURATION: |
+        kestra:
+          server:
+            basicAuth:
+              enabled: false
+          repository:
+            type: postgres
+          queue:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: /app/storage
+          anonymousUsageReport:
+            enabled: false
+          ee:
+            license:
+              id: "${KESTRA_EE_LICENSE_ID:-}"
+              fingerprint: "${KESTRA_EE_LICENSE_FINGERPRINT:-}"
+              key: "${KESTRA_EE_LICENSE_KEY:-}"
+        datasources:
+          postgres:
+            url: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-kestra}
+            driverClassName: org.postgresql.Driver
+            username: ${POSTGRES_USER:-kestra}
+            password: ${POSTGRES_PASSWORD:-kestraPostgres123}
+    volumes:
+      - kestra-storage:/app/storage
+      - /tmp/kestra-autoscaling-wd:/tmp/kestra-wd
+
+  flow-init:
+    image: curlimages/curl:8.7.1
+    depends_on:
+      - kestra
+    volumes:
+      - ../flows:/flows:ro
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        until curl -fsS "http://kestra:8080/api/v1/main/flows/search?size=1" >/dev/null; do
+          echo "waiting for Kestra API..."; sleep 3;
+        done
+        curl -fsS -X POST -F "fileUpload=@/flows/webhook_sleep.yaml" \
+          "http://kestra:8080/api/v1/main/flows/import?failOnError=true"
+        echo "flow imported"
+
+  trigger-app:
+    build:
+      context: ../app
+    depends_on:
+      - kestra
+    ports:
+      - "${APP_PORT:-5173}:5173"
+    environment:
+      KESTRA_BASE_URL: "http://kestra:8080"
+      KESTRA_MGMT_URL: "http://kestra:8081"
+      KESTRA_TENANT: "main"
+      FLOW_NAMESPACE: "company.autoscaling"
+      FLOW_ID: "webhook_sleep"
+      WEBHOOK_KEY: "demo-key"
+      WORKER_THREADS: "${WORKER_THREADS:-4}"
+      RATE_BASELINE: "${RATE_BASELINE:-8}"
+      RATE_SPIKE: "${RATE_SPIKE:-24}"
+      RATE_DROP: "${RATE_DROP:-2}"
+      RATE_MAX: "${RATE_MAX:-30}"
+      APP_PORT: "5173"
+
+volumes:
+  kestra-storage:

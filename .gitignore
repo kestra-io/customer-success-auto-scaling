@@ -1,0 +1,22 @@
+# local config (never commit real secrets)
+.env
+app/.env
+compose/.env
+
+# runtime state
+.state/
+*.log
+*.pid
+
+# build / deps
+node_modules/
+**/__pycache__/
+*.pyc
+.venv/
+
+# k8s / kube
+kubeconfig*
+*.kubeconfig
+
+# os
+.DS_Store

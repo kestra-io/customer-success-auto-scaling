@@ -1,0 +1,11 @@
+# Single-node kind cluster for the auto-scaling example.
+#
+# We do NOT use extraPortMappings here — scripts/up.sh runs a background
+# `kubectl port-forward` for 8080/8081 on 127.0.0.1 instead (simpler, no chart
+# NodePort wiring). If you prefer NodePort + host mapping, add extraPortMappings
+# for containerPort 30080/30081 and a matching NodePort Service in helm/values.yaml.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: kestra-autoscaling      # overridden by --name $KIND_CLUSTER_NAME in up.sh
+nodes:
+  - role: control-plane

@@ -1,0 +1,184 @@
+# Distributed Kestra for the auto-scaling example.
+#
+# Rendered by scripts/up.sh through `envsubst` with an EXPLICIT variable list, so
+# only the ${...} tokens below are replaced (Kestra's own ${...} refs, if any,
+# are left intact). This committed file contains NO secrets — the image-pull
+# secret is created imperatively by scripts/create-secrets.sh; license + internal
+# secrets come from .env at render time.
+#
+# Trim of ../../infra/my-kestra/values.yaml with three deliberate changes:
+#   * kestra.server.basicAuth.enabled: false   (demo: open UI / webhook / /prometheus)
+#   * deployments.worker.workerThreads: 4      (deterministic concurrency ceiling)
+#   * dind.enabled: false                      (Sleep needs no runner; faster pods)
+
+image:
+  repository: ${KESTRA_IMAGE_REPO}
+  tag: "${KESTRA_IMAGE_TAG}"
+
+# Rendered only for the EE image; scripts/up.sh strips this block for OSS.
+imagePullSecrets:
+  - name: kestra-registry
+
+deployments:
+  standalone:
+    enabled: false
+
+  webserver:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 300m, memory: 1536Mi }   # no limits: JVM headroom on a laptop
+
+  executor:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 250m, memory: 768Mi }
+
+  indexer:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 150m, memory: 512Mi }
+
+  scheduler:
+    enabled: true
+    replicas: 1
+    resources:
+      requests: { cpu: 150m, memory: 512Mi }
+
+  worker:
+    enabled: true
+    replicas: 1
+    workerThreads: 4          # chart renders `--thread=4` on the worker process
+    resources:
+      requests: { cpu: 250m, memory: 768Mi }
+
+# No container task runner in this demo — the Sleep task runs on a worker thread.
+dind:
+  enabled: false
+
+service:
+  type: ClusterIP
+  ports:
+    http:
+      port: 8080
+    management:
+      port: 8081
+
+ingress:
+  enabled: false
+
+configurations:
+  application:
+    kestra:
+      queue:
+        type: postgres
+      repository:
+        type: postgres
+      storage:
+        type: local
+        local:
+          base-path: "/app/storage"
+    datasources:
+      postgres:
+        url: jdbc:postgresql://kestra-postgres:5432/kestra
+        driverClassName: org.postgresql.Driver
+        username: ${POSTGRES_USER}
+        password: ${POSTGRES_PASSWORD}
+
+common:
+  extraEnvFrom:
+    - secretRef:
+        name: kestra-sensitive
+
+extraManifests:
+  # Sensitive Kestra config (rendered from .env at bring-up).
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: kestra-sensitive
+    stringData:
+      KESTRA_CONFIGURATION: |
+        kestra:
+          server:
+            basicAuth:
+              enabled: false
+          secret:
+            type: jdbc
+            jdbc:
+              secret: "${KESTRA_JDBC_SECRET}"
+          encryption:
+            secret-key: "${KESTRA_ENCRYPTION_SECRET_KEY}"
+          ee:
+            license:
+              id: "${KESTRA_EE_LICENSE_ID}"
+              fingerprint: "${KESTRA_EE_LICENSE_FINGERPRINT}"
+              key: "${KESTRA_EE_LICENSE_KEY}"
+          anonymousUsageReport:
+            enabled: false
+        micronaut:
+          security:
+            token:
+              jwt:
+                signatures:
+                  secret:
+                    generator:
+                      secret: "${KESTRA_JWT_SECRET}"
+              cookie:
+                cookie-max-age: 10h
+
+  # In-cluster Postgres.
+  - apiVersion: v1
+    kind: Secret
+    metadata:
+      name: kestra-postgres-secret
+    stringData:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+
+  - apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      name: kestra-postgres
+    spec:
+      selector:
+        matchLabels:
+          app: kestra-postgres
+      serviceName: kestra-postgres
+      replicas: 1
+      template:
+        metadata:
+          labels:
+            app: kestra-postgres
+        spec:
+          containers:
+            - name: postgres
+              image: postgres:16
+              envFrom:
+                - secretRef:
+                    name: kestra-postgres-secret
+              ports:
+                - containerPort: 5432
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/postgresql/data
+      volumeClaimTemplates:
+        - metadata:
+            name: data
+          spec:
+            accessModes: ["ReadWriteOnce"]
+            resources:
+              requests:
+                storage: 10Gi
+
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: kestra-postgres
+    spec:
+      selector:
+        app: kestra-postgres
+      ports:
+        - port: 5432

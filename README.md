@@ -1,0 +1,83 @@
+# Kestra Worker Auto-Scaling Example
+
+A self-contained example that makes one problem tangible and then compares two
+ways to solve it:
+
+> A Kestra flow is triggered by a spiky, webhook-driven workload. The only thing
+> limiting how many executions run at once is the worker pool
+> (`worker_replicas × worker_threads`). When traffic spikes, work backs up in
+> Kestra's internal queue. To keep latency acceptable, teams pre-provision a
+> fixed, peak-sized worker pool — which is idle and wasteful most of the time.
+> How do you make the pool grow and shrink with actual demand?
+
+Nothing here is tied to a real customer. It is a teaching artifact and the
+skeleton the two solution workstreams are built out in.
+
+## What's in the box
+
+| Piece | Path | Role |
+|---|---|---|
+| Distributed Kestra on Kubernetes | `helm/values.yaml`, `kind/cluster.yaml` | Kestra **EE v1.3.24**, 1 worker, **exactly 4 threads** → hard ceiling of 4 concurrent executions |
+| The workload flow | `flows/webhook_sleep.yaml` | Webhook trigger → one `Sleep` task (`PT15S`). Deliberately trivial and quick to watch |
+| Trigger app | `app/` | One Node container: a slider for **trigger rate**, **spike / baseline / drop** presets, and a live readout of `pending` vs. `capacity` scraped from Kestra's Prometheus endpoint |
+| **Workstream 1** — Prometheus + worker scaling | `workstream-1-prometheus-worker-scaling/` | A small custom control-loop container that watches `kestra_worker_job_pending` / `kestra_worker_job_running` on `:8081/prometheus` and scales the `worker` Deployment up/down |
+| **Workstream 2** — flow `concurrency.limit` | `workstream-2-flow-concurrency-limit/` | **Placeholder.** Same signal, different actuator (bounded queue instead of more capacity). Mechanism TBD |
+| Compose quickstart | `compose/` | See the *problem* in ~2 minutes with no cluster (single-node Kestra + the app) |
+
+## Quickstart (Kubernetes path)
+
+Prerequisites and the full walk-through are in [`SETUP.md`](./SETUP.md). Short version:
+
+```bash
+cp .env.example .env
+# fill in KESTRA_EE_LICENSE_* and the registry creds (or switch to the OSS image, see below)
+docker login registry.kestra.io          # EE image only
+
+make up          # kind cluster + Helm + flow import + trigger app; prints all URLs
+make scaler      # deploy Workstream 1
+
+# open the trigger app, hit "Spike", watch:  kubectl get deploy -n autoscaling -w
+make down
+```
+
+## No EE license? Swap the image.
+
+This example uses **no** Enterprise-only features (no worker groups, no EE RBAC).
+Set one value in `.env` and skip the registry login and license entirely:
+
+```bash
+KESTRA_IMAGE=kestra/kestra:v1.3.24
+```
+
+Behaviour is identical for the purposes of this demo.
+
+## Calibration at a glance
+
+`Sleep = 15 s`, `threads_per_worker = 4`, starting `replicas = 1` → **capacity = 4**.
+
+| Preset | Trigger rate | In-flight (Little's Law `λ·15s`) | What happens |
+|---|---|---|---|
+| Drop | 2 / min | ~0.5 (≈12 %) | scaler returns worker to 1 replica |
+| **Baseline (default)** | **8 / min** | **2 (50 %)** | steady, queue empty |
+| Spike | 24 / min | 6 (150 %) | `pending` climbs → scaler adds a 2nd worker (capacity 8) → queue drains |
+
+## Security note
+
+For demo convenience `kestra.server.basicAuth.enabled: false`, so the UI, the
+webhook, and `/prometheus` are all open on localhost. **Never** run a real
+deployment this way.
+
+## Layout
+
+```
+auto-scaling/
+├── README.md · PLAN.md · SETUP.md · Makefile · .env.example
+├── kind/cluster.yaml               kind cluster definition
+├── helm/values.yaml                distributed Kestra EE, worker replicas:1 threads:4
+├── flows/webhook_sleep.yaml        the workload flow
+├── scripts/                        bring-up / teardown / verification
+├── app/                            Node trigger app (slider + presets + /stats)
+├── compose/                        no-cluster quickstart
+├── workstream-1-prometheus-worker-scaling/
+└── workstream-2-flow-concurrency-limit/   (placeholder)
+```

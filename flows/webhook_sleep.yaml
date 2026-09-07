@@ -1,0 +1,21 @@
+id: webhook_sleep
+namespace: company.autoscaling
+description: |
+  Minimal workload for the auto-scaling example. A webhook starts an execution
+  that does nothing but wait 15 seconds — long enough to watch, short enough to
+  demo. There is intentionally NO `concurrency:` block: the only thing limiting
+  how many of these run at once is the worker pool (replicas x threads).
+
+labels:
+  example: auto-scaling
+  role: workload
+
+tasks:
+  - id: hold
+    type: io.kestra.plugin.core.flow.Sleep
+    duration: PT15S
+
+triggers:
+  - id: hook
+    type: io.kestra.plugin.core.trigger.Webhook
+    key: demo-key

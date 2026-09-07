@@ -1,0 +1,78 @@
+:root {
+  --bg: #0f1115;
+  --card: #181b22;
+  --ink: #e7e9ee;
+  --muted: #9aa3b2;
+  --line: #2a2f3a;
+  --running: #3b82f6;
+  --pending: #ef4444;
+  --primary: #22c55e;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 640px; margin: 0 auto; padding: 32px 20px 60px; }
+h1 { margin: 0 0 4px; font-size: 22px; }
+.sub { margin: 0 0 20px; color: var(--muted); }
+code { background: #11141a; padding: 1px 5px; border-radius: 4px; font-size: 13px; }
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 18px;
+  margin-bottom: 16px;
+}
+.row { display: flex; gap: 8px; margin-bottom: 16px; }
+button {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  background: #1f232c;
+  color: var(--ink);
+  border-radius: 8px;
+  font-size: 14px;
+  cursor: pointer;
+}
+button:hover { border-color: #3a4150; }
+button.primary { border-color: var(--primary); }
+button.active { outline: 2px solid var(--primary); }
+.slider-label { display: block; font-size: 14px; }
+input[type="range"] { width: 100%; margin-top: 8px; accent-color: var(--running); }
+.hint { color: var(--muted); font-size: 13px; margin: 8px 0 0; min-height: 1em; }
+
+.gauge { margin-bottom: 14px; }
+.bar-track {
+  position: relative;
+  display: flex;
+  height: 26px;
+  background: #11141a;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.bar { height: 100%; transition: width .4s ease; }
+.bar-running { background: var(--running); }
+.bar-pending { background: var(--pending); opacity: .85; }
+.gauge-legend {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 6px;
+}
+.gauge-legend .cap { margin-left: auto; }
+.sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; vertical-align: middle; margin-right: 4px; }
+.sw-running { background: var(--running); }
+.sw-pending { background: var(--pending); }
+
+.stats { width: 100%; border-collapse: collapse; font-size: 14px; }
+.stats th { text-align: left; color: var(--muted); font-weight: 500; padding: 5px 8px 5px 0; width: 30%; }
+.stats td { padding: 5px 16px 5px 0; font-variant-numeric: tabular-nums; }
+.over td#s-pending, .over td#s-running { color: var(--pending); font-weight: 700; }
+
+.foot { color: var(--muted); font-size: 12px; margin-top: 24px; }

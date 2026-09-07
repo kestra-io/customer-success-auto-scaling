@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: worker-scaler
+  namespace: {{NAMESPACE}}
+  labels:
+    app: worker-scaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: worker-scaler
+  template:
+    metadata:
+      labels:
+        app: worker-scaler
+    spec:
+      serviceAccountName: worker-scaler
+      containers:
+        - name: scaler
+          image: kestra-autoscaling/worker-scaler:local
+          imagePullPolicy: IfNotPresent          # image is `kind load`ed, not pulled
+          envFrom:
+            - configMapRef:
+                name: worker-scaler-config       # rendered by scripts/deploy-scaler.sh
+          resources:
+            requests:
+              cpu: 25m
+              memory: 64Mi

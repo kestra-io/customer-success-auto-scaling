@@ -1,0 +1,2 @@
+# Prometheus scrape uses the stdlib (urllib) — no HTTP client dependency.
+kubernetes>=29.0.0

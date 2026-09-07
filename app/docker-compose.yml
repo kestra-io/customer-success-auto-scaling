@@ -1,0 +1,29 @@
+name: kestra-autoscaling-app
+
+services:
+  trigger-app:
+    build:
+      context: .
+    ports:
+      - "${APP_PORT:-5173}:5173"
+    environment:
+      # Kestra is reached on the host via the background `kubectl port-forward`
+      # started by scripts/up.sh (8080 = API, 8081 = management/prometheus).
+      KESTRA_BASE_URL: "http://host.docker.internal:8080"
+      KESTRA_MGMT_URL: "http://host.docker.internal:8081"
+      KESTRA_TENANT: "${KESTRA_TENANT:-main}"
+      FLOW_NAMESPACE: "${FLOW_NAMESPACE:-company.autoscaling}"
+      FLOW_ID: "${FLOW_ID:-webhook_sleep}"
+      WEBHOOK_KEY: "${WEBHOOK_KEY:-demo-key}"
+      WORKER_THREADS: "${WORKER_THREADS:-4}"
+      METRIC_PENDING: "${METRIC_PENDING:-kestra_worker_job_pending}"
+      METRIC_RUNNING: "${METRIC_RUNNING:-kestra_worker_job_running}"
+      METRIC_THREADS: "${METRIC_THREADS:-kestra_worker_job_thread}"
+      RATE_BASELINE: "${RATE_BASELINE:-8}"
+      RATE_SPIKE: "${RATE_SPIKE:-24}"
+      RATE_DROP: "${RATE_DROP:-2}"
+      RATE_MAX: "${RATE_MAX:-30}"
+      APP_PORT: "5173"
+    extra_hosts:
+      # Linux parity: Docker Desktop (mac/win) resolves host.docker.internal natively.
+      - "host.docker.internal:host-gateway"
