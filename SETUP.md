@@ -79,13 +79,14 @@ make up
 
 ## 4. Run the demo
 
-1. Open the trigger app. Leave the slider at the default (**8 / min**). After
+1. Open the trigger app: [http://localhost:5173](http://localhost:5173)  
+2. Leave the slider at the default (**8 / min**). After
    ~90 s the readout should show `running ≈ 2`, `pending ≈ 0`, `capacity = 4`
    (~50 %). If it sits high or low, adjust `RATE_BASELINE` in `.env` and
    `make app` again.
-2. Click **Spike** (24 / min). Within a minute or two `pending` climbs and
+3. Click **Spike** (24 / min). Within a minute or two `pending` climbs and
    `running` pins at 4.
-3. Click **Drop** (2 / min). `pending` drains, `running` falls below 1.
+4. Click **Drop** (2 / min). `pending` drains, `running` falls below 1.
 
 ## 5. Workstream 1 — Prometheus + worker scaling
 
