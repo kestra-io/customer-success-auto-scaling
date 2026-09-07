@@ -44,16 +44,23 @@ render_values() {
 }
 render_values "$ROOT/helm/values.yaml" "$RENDERED"
 
-# --wait blocks until all workloads are Ready; the 12m timeout covers the first
-# ~3.5GB EE image pull. If it still times out, wait-ready.sh re-checks below.
-HELM_ARGS=(upgrade --install "$HELM_RELEASE" kestra/kestra -n "$K8S_NAMESPACE" --create-namespace -f "$RENDERED" --wait --timeout 12m)
+# --wait blocks until all workloads are Ready; the timeout must cover the first
+# EE image pull, which can take 20-30 min on a cold node / slow link. If it still
+# times out, the webserver gate + wait-ready.sh below re-check.
+HELM_ARGS=(upgrade --install "$HELM_RELEASE" kestra/kestra -n "$K8S_NAMESPACE" --create-namespace -f "$RENDERED" --wait --timeout 40m)
 [[ -n "${HELM_CHART_VERSION:-}" ]] && HELM_ARGS+=(--version "$HELM_CHART_VERSION")   # pin the chart if set
 [[ "$IS_EE" == "true" ]] || HELM_ARGS+=(--set-json 'imagePullSecrets=[]')            # OSS: no pull secret
 
 log "helm ${HELM_ARGS[*]}"
 helm --kube-context "$KCTX" "${HELM_ARGS[@]}" || warn "helm --wait returned non-zero (slow pull?) — wait-ready.sh will confirm"
 
-# 6. Port-forwards FIRST — steps 7/8/9 all talk to 127.0.0.1:{8080,8082}.
+# 6. Gate on the webserver being Ready before port-forwarding — this is what
+#    actually absorbs the long image pull if `helm --wait` bailed early. The
+#    port-forward target (the webserver Service endpoint) must exist first.
+log "waiting for the webserver (covers the image pull; up to 40m on a cold node)"
+kctl rollout status "deploy/$(kestra_deploy webserver)" --timeout=2400s
+
+# 7. Port-forwards — steps 8/9/10 all talk to 127.0.0.1:{8080,8082}.
 "$HERE/portforward.sh" start
 
 # 7. Readiness: rollout status for every component + an authenticated API probe.
