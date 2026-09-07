@@ -52,10 +52,15 @@ docker compose up --build
 ## Tear down
 
 ```bash
-make down                       # kind cluster + app + scaler + port-forward
+make down            # soft: uninstall Kestra + scaler + app + port-forwards; KEEPS the
+                     #       kind cluster so the next `make up` skips the ~4GB image pull
+make down-hard       # full: also `kind delete cluster`
 # compose path:
 cd compose && docker compose down -v
 ```
+
+Use `make down` between demo runs; `make down-hard` only when done for a while or
+after editing `kind/cluster.yaml`.
 
 ## Troubleshooting
 

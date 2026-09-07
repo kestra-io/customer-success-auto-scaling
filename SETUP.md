@@ -58,14 +58,15 @@ make up
 
 > **Helm repo URL:** the `kestra-kubectl` skill uses `https://helm.kestra.io/`.
 
-> **Slow first run:** the EE image is ~3.5 GB and the node pulls it once per
+> **Slow first run:** the EE image is ~4 GB and the node pulls it once per
 > component. On a cold node / slow link the first `make up` can sit in
 > "waiting for the webserver" for **20–30 minutes**. The script timeouts
-> (`helm --wait` 40m, rollout waits 40m) allow for this. To pre-warm the host
-> cache: `docker pull $KESTRA_IMAGE` before `make up`.
-> (`kind load docker-image` does *not* work here — Docker Desktop's containerd
-> image store produces an archive kind's `ctr import` rejects — so the node
-> pulls from the registry regardless.)
+> (`helm --wait` 40m, rollout waits 40m) allow for this.
+>
+> **After the first run, use `make down` (soft), not `make down-hard`** — soft
+> teardown keeps the kind cluster, so its ~4 GB image cache survives and the next
+> `make up` reinstalls in ~1 minute with no re-pull. See §6.
+
 
 ## Expected URLs
 
@@ -109,11 +110,25 @@ Now repeat step 4:
 ## 6. Tear down
 
 ```bash
-make down
+make down        # soft: uninstall Kestra + scaler + app + port-forwards; KEEP the kind cluster
+make down-hard   # full: soft + `kind delete cluster`
 ```
 
-Removes the trigger app compose project, deletes the scaler resources, kills the
-port-forward, and `kind delete cluster`.
+**Use `make down` for day-to-day iteration.** It `helm uninstall`s Kestra, removes
+the scaler, stops the trigger app, and kills the port-forwards — but leaves the
+kind cluster running. That preserves:
+
+- the node's **~4 GB image cache** → the next `make up` starts pods in seconds
+  instead of re-pulling the EE image (10–30 min on a cold node);
+- the **postgres PVC** → the DB is already migrated, so Kestra boots faster.
+
+`make down-hard` additionally `kind delete cluster`s for a true clean slate (new
+DB, empty image cache). Use it when you've changed `kind/cluster.yaml`, suspect
+cluster-level drift, or are done for a while.
+
+> The soft path also sidesteps the Helm-vs-scaler `.spec.replicas` field-manager
+> conflict — each `make up` is a fresh `helm install`, not an `upgrade` over a
+> release the scaler has already patched.
 
 ## 7. Compose quickstart (no cluster)
 

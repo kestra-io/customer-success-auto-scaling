@@ -4,13 +4,7 @@
 #   8081 -> webserver mgmt   (webserver /prometheus)     via svc/<webserver>
 #   8082 -> worker  mgmt     (kestra_worker_job_*)        via svc/kestra-worker-metrics
 #   8083 -> worker-scaler    (GET /state, authoritative)  via svc/worker-scaler   [if deployed]
-#
-#   portforward.sh start | stop | status
-#
-# `kubectl port-forward svc/X` pins to ONE endpoint pod; if that pod is replaced
-# the tunnel dies. Re-run `start` to re-establish (idempotent). This is exactly
-# why :8082 can't tell the trigger app the real replica count — it only ever
-# sees one worker pod — and why the scaler's own :8083/state exists.
+
 source "$(dirname "$0")/lib.sh"
 load_env
 

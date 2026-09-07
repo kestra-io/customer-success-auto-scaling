@@ -4,7 +4,7 @@
 SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
-.PHONY: help up down flow app app-down scaler scaler-down status metrics logs
+.PHONY: help up down down-hard flow app app-down scaler scaler-down status metrics logs
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -13,8 +13,11 @@ help: ## Show this help
 up: ## Full bring-up: kind + Helm + flow + trigger app; prints URLs
 	./scripts/up.sh
 
-down: ## Tear everything down (cluster, app, scaler, port-forward)
+down: ## Soft teardown: uninstall Kestra+scaler+app, KEEP the kind cluster (warm image cache)
 	./scripts/down.sh
+
+down-hard: ## Full teardown: soft + `kind delete cluster` (next `make up` re-pulls images)
+	./scripts/down.sh hard
 
 flow: ## (Re)import flows/webhook_sleep.yaml and smoke-test the webhook
 	./scripts/import-flow.sh

@@ -157,14 +157,17 @@ Once the scaler has patched `kestra-worker` via the `scale` subresource, a later
 conflict with "OpenAPI-Generator" ... subresource "scale" ... .spec.replicas
 ```
 
-Before re-running `helm upgrade` / `make up` on a live cluster:
+This only bites a `helm upgrade` over a *running* release. Before doing one on a
+live cluster:
 
 ```bash
 kubectl -n autoscaling scale deploy/worker-scaler --replicas=0
 kubectl -n autoscaling scale deploy/kestra-worker --replicas=1
 ```
 
-`make down` sidesteps this entirely (it deletes the cluster).
+Both `make down` (soft: `helm uninstall`, keep the cluster) and `make down-hard`
+(also `kind delete cluster`) sidestep it — the next `make up` is a fresh
+`helm install`, not an upgrade.
 
 ## Production-grade equivalent (not built here)
 

@@ -52,7 +52,9 @@ make scaler      # deploy Workstream 1
 # hit "Spike"
 # watch:  kubectl get deploy -n autoscaling -w
 
-# Tear down the demo
+# Tear down. 
+# `make down` keeps the kind cluster so the next `make up` is fast
+# `make down-hard` also deletes the cluster.
 make down
 ```
 
