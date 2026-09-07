@@ -20,12 +20,8 @@ A human-driven demo, not an automation. Everything lives in
 
 ```bash
 cd initiatives/auto-scaling
-make up          # ~5-10 min first run (EE image pull). Prints 4 URLs at the end.
+make up          # ~10-15 min first run (EE image pull). Prints 4 URLs at the end.
 ```
-
-If `helm repo` fails, switch `HELM_REPO_URL` in `.env` to
-`https://charts.kestra.io` and re-run.
-If the port-forward drops later, `scripts/portforward.sh start`.
 
 ## Demo script
 
