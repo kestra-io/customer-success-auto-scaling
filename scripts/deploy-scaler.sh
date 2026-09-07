@@ -1,33 +1,37 @@
 #!/usr/bin/env bash
-# Build, load, configure, and deploy the Workstream 1 scaler.
+# Build the scaler image, load it into the kind node, apply RBAC, render the
+# config ConfigMap from .env + .state/metric-names.env, and deploy it. (= `make scaler`)
 source "$(dirname "$0")/lib.sh"
 load_env
 
 WS1="$ROOT/workstream-1-prometheus-worker-scaling"
-IMAGE="kestra-autoscaling/worker-scaler:local"
+IMAGE="kestra-autoscaling/worker-scaler:local"     # local tag; never pushed, always `kind load`ed
 
-# metric names discovered at bring-up (fall back to .env defaults)
+# Prefer the metric names pinned by verify-metrics.sh; fall back to .env defaults.
 [[ -f "$STATE_DIR/metric-names.env" ]] && { set -a; source "$STATE_DIR/metric-names.env"; set +a; }
 
 WORKER_DEPLOYMENT_NAME="$(kestra_deploy worker)"
 [[ -n "$WORKER_DEPLOYMENT_NAME" ]] || die "could not find the worker deployment by label"
-# Each worker emits metrics on its own :8081, so the
-# scaler discovers worker pods by label and scrapes them directly (PROMETHEUS_URL
-# left empty = discovery mode).
+# The scaler discovers worker pods by this selector and scrapes each pod's :8081
+# directly (PROMETHEUS_URL left empty on the ConfigMap = discovery mode).
 WORKER_SELECTOR="app.kubernetes.io/name=kestra,app.kubernetes.io/component=worker"
 log "worker deployment: ${WORKER_DEPLOYMENT_NAME}   scrape: pods matching '${WORKER_SELECTOR}' :8081"
 
 log "build $IMAGE"
 docker build -t "$IMAGE" "$WS1"
 log "kind load $IMAGE"
-kind load docker-image "$IMAGE" --name "$KIND_CLUSTER_NAME"
+kind load docker-image "$IMAGE" --name "$KIND_CLUSTER_NAME"   # copy into the node's containerd
 
 log "apply RBAC"
+# The k8s manifests carry a {{NAMESPACE}} placeholder (kubectl -n can't set
+# metadata.namespace or a RoleBinding subject namespace).
 for m in serviceaccount role rolebinding; do
   sed "s/{{NAMESPACE}}/${K8S_NAMESPACE}/g" "$WS1/k8s/${m}.yaml" | kctl apply -f -
 done
 
 log "verify the ServiceAccount can scale the worker Deployment"
+# --subresource=scale is the modern syntax; `deployments/scale` (slash) doesn't
+# parse in `auth can-i` on newer kubectl even when the Role grants it.
 if kctl auth can-i patch deployments --subresource=scale \
      --as="system:serviceaccount:${K8S_NAMESPACE}:worker-scaler" >/dev/null; then
   ok "RBAC ok (can patch deployments/scale)"
@@ -36,6 +40,9 @@ else
 fi
 
 log "render + apply scaler config"
+# Every knob the scaler reads (scaler/config.py). dry-run|apply so re-running
+# `make scaler` just updates the ConfigMap. ${VAR:-default} mirrors config.py's
+# defaults so an unset .env var still produces a sane value.
 kctl create configmap worker-scaler-config \
   --from-literal=PROMETHEUS_URL="" \
   --from-literal=WORKER_LABEL_SELECTOR="$WORKER_SELECTOR" \

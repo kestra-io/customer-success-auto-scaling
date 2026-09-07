@@ -1,22 +1,26 @@
 #!/usr/bin/env bash
-# Scrape a worker's :8081/prometheus (via the :8082 port-forward to
-# svc/kestra-worker-metrics), confirm the worker queue metrics exist, and record
-# their exact names in .state/metric-names.env for the app + scaler to consume.
+# Scrape a worker's /prometheus, confirm the three queue gauges exist, and pin
+# their EXACT names into .state/metric-names.env — which deploy-scaler.sh and the
+# trigger app then read. This makes the demo survive a Kestra build that renames
+# the metrics (defaults assume EE 1.3.24: kestra_worker_job_pending/_running/_thread).
 #
-# In EE kestra_worker_job_pending / _running / _thread are exposed ONLY on
-# each worker pod's own :8081 — not on the webserver.
+# In EE these gauges live ONLY on each worker pod's :8081 — never the webserver.
 source "$(dirname "$0")/lib.sh"
 load_env
 
 PROM="$STATE_DIR/prometheus-worker.txt"
 log "scraping ${KESTRA_WORKER_MGMT}/prometheus (worker metrics)"
+# Preferred path: the :8082 port-forward to svc/kestra-worker-metrics.
 if ! curl -fsS "${KESTRA_WORKER_MGMT}/prometheus" -o "$PROM"; then
+  # Fallback if the port-forward isn't up: exec into a worker pod and curl locally.
   warn "port-forward :8082 not up — trying a worker pod directly via kubectl exec"
   wp="$(kctl get pod -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}')"
   [[ -n "$wp" ]] || die "no worker pod found"
   kctl exec "$wp" -- sh -c 'curl -s http://localhost:8081/prometheus' > "$PROM" || die "could not scrape worker $wp"
 fi
 
+# Return <preferred> if it's present as a series; else the first kestra_worker_*
+# series containing <substr>; else <preferred> unchanged.
 pick() {  # pick <preferred> <substr>
   local pref="$1" rx="$2" hit
   if grep -qE "^${pref}(\{|[[:space:]])" "$PROM"; then echo "$pref"; return; fi
@@ -36,11 +40,13 @@ M_THREADS="$(pick "${METRIC_THREADS:-kestra_worker_job_thread}"  'thread')"
 } > "$STATE_DIR/metric-names.env"
 
 echo
+# Confirm all three resolved names are actually present as series.
 if grep -E "^(${M_PENDING}|${M_RUNNING}|${M_THREADS})(\{|[[:space:]])" "$PROM"; then
   echo
   ok "metric names pinned -> $STATE_DIR/metric-names.env"
   cat "$STATE_DIR/metric-names.env"
 else
+  # Common cause: the worker hasn't run a task yet so the gauges aren't emitted.
   warn "expected worker metrics not found. Present kestra_worker_* series:"
   grep -oE '^kestra_worker_[a-z_]+' "$PROM" | sort -u | sed 's/^/  /' | head -30
   exit 1
