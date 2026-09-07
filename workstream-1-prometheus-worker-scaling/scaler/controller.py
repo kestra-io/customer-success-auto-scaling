@@ -1,15 +1,20 @@
-"""Workstream 1: scale the Kestra worker Deployment off Prometheus queue metrics.
+"""Workstream 1 control loop: scale the Kestra worker Deployment off the
+per-worker Prometheus queue gauges.
 
-Scale UP   when `pending` stays >= threshold for a sustained window.
-Scale DOWN when `running` stays <= ratio * capacity AND `pending` == 0 for a
-           longer sustained window.
-Respects MIN/MAX replicas, a fixed step, and a cooldown after any action.
+  observe   sum kestra_worker_job_pending / _running across all Ready worker pods
+  decide    sustained-window policy (scale up / down / hold), gated by a cooldown
+  act       patch deployments/scale (or just log, if DRY_RUN)
+  log       one structured line per tick — the operator's live view
 
-In EE there is no cross-service metric aggregation, so the loop lists the
-worker pods and scrapes each pod's own :8081/prometheus, then sums.
+Scale UP   when `pending` stays >= threshold for a full up-window.
+Scale DOWN when `pending == 0` AND `running <= ratio*capacity` for a full
+           (longer) down-window.
+Bounded by MIN/MAX replicas, moved by SCALE_STEP, and quiet for COOLDOWN_SECONDS
+after any action.
 
-This is deliberately a small, readable control loop rather than KEDA/HPA so the
-logic is explicit and every knob is a plain env var.
+Deliberately a small readable loop, not KEDA/HPA, so the logic is explicit and
+every knob is a plain env var. See ./README.md for internals, ../README.md for
+what/why/run.
 """
 from __future__ import annotations
 
@@ -25,6 +30,9 @@ from . import promscrape
 
 @dataclass
 class Sample:
+    """One observation. `ts` is time.monotonic() — a relative clock that never
+    jumps backwards (NTP/DST), which is all the loop needs since every check is
+    a duration."""
     ts: float
     pending: float
     running: float
@@ -32,7 +40,14 @@ class Sample:
 
 
 def _covered(samples: list[Sample], window_s: float, poll_s: float) -> bool:
-    """True once the retained samples actually span the window (guards startup)."""
+    """True once the retained samples actually SPAN the window.
+
+    Startup guard: for the first `window_s` after the process starts (or after
+    the queue first goes non-empty) the history is only partially filled, and
+    acting on it would let a single 15 s blip trigger a scale action. This
+    blocks any decision until there is a full window of evidence. The `- poll_s`
+    tolerates the gap before the next sample lands.
+    """
     return bool(samples) and (samples[-1].ts - samples[0].ts) >= (window_s - poll_s)
 
 
@@ -41,19 +56,24 @@ class Controller:
         self.cfg = cfg
         self.k8s = k8s
         self.log = logging.getLogger("scaler")
+        # The only mutable state. Losing it on a pod restart is safe: the loop
+        # can't act until it rebuilds a full window (_covered), and
+        # last_action_ts = 0.0 means it is not wedged in a cooldown.
         self.history: deque[Sample] = deque()
         self.last_action_ts = 0.0
+        # Keep enough history for the longest window plus a margin.
         self._retain_s = max(cfg.scale_up_window_s, cfg.scale_down_window_s) + cfg.poll_interval_s * 2
 
     def _scrape_workers(self) -> tuple[float, float] | None:
-        """Sum pending + running across every worker pod. None if nothing scrapeable."""
+        """Sum (pending, running) across every worker pod. `None` => this tick
+        has no usable observation and must be skipped."""
         cfg = self.cfg
         if cfg.prometheus_url:
-            urls = [cfg.prometheus_url]
+            urls = [cfg.prometheus_url]              # single-endpoint mode (compose / tests)
         else:
             try:
                 urls = self.k8s.worker_metrics_urls(cfg.worker_metrics_port)
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - transient API error
                 self.log.warning("could not list worker pods: %s", exc)
                 return None
         if not urls:
@@ -61,7 +81,7 @@ class Controller:
             return None
 
         pending = running = 0.0
-        ok = 0
+        ok = 0                                       # count of endpoints that gave usable metrics
         for url in urls:
             try:
                 text = promscrape.fetch(url, timeout=4.0)
@@ -70,22 +90,31 @@ class Controller:
                 continue
             p = promscrape.sum_metric(text, cfg.metric_pending)
             r = promscrape.sum_metric(text, cfg.metric_running)
-            if p is None or r is None:
+            if p is None or r is None:              # wrong metric names, or wrong endpoint
                 self.log.warning("metrics %s/%s not found at %s",
                                  cfg.metric_pending, cfg.metric_running, url)
                 continue
             pending += p
             running += r
             ok += 1
-        if ok == 0:
+        if ok == 0:                                 # every endpoint failed -> skip the tick
             return None
         return pending, running
 
     def _decide(self, now: float, replicas: int) -> tuple[int | None, str]:
+        """Pure policy: (target_replicas | None, human-readable reason).
+        Touches no external state, so it is trivially unit-testable."""
         cfg = self.cfg
+
+        # Cooldown is checked FIRST and short-circuits everything: after a scale
+        # action we must wait long enough for a new worker pod to start and
+        # register, or we'd see the still-high `pending` and stack another
+        # scale-up before the first worker's threads come online.
         if now - self.last_action_ts < cfg.cooldown_s:
             return None, "cooldown"
 
+        # Scale up: EVERY sample in the up-window must be at/over threshold
+        # (a single tick below resets the case) -> requires a sustained signal.
         up = [s for s in self.history if now - s.ts <= cfg.scale_up_window_s]
         if (
             replicas < cfg.max_replicas
@@ -94,6 +123,9 @@ class Controller:
         ):
             return min(replicas + cfg.scale_step, cfg.max_replicas), "sustained pending -> scale up"
 
+        # Scale down: longer window (release capacity cautiously), and the test
+        # is capacity-relative (running <= ratio * capacity) so the same rule
+        # works at any replica count. Also requires an empty queue.
         dn = [s for s in self.history if now - s.ts <= cfg.scale_down_window_s]
         if (
             replicas > cfg.min_replicas
@@ -105,28 +137,30 @@ class Controller:
         return None, "hold"
 
     def tick(self) -> None:
+        """One observe/decide/act/log cycle. Any early `return` means
+        'do nothing this tick' — the safe default on partial failure."""
         cfg = self.cfg
         now = time.monotonic()
 
         scraped = self._scrape_workers()
         if scraped is None:
-            return
+            return                                   # no observation -> no sample, no decision
         pending, running = scraped
 
         try:
             replicas = self.k8s.get_replicas()
         except Exception as exc:  # noqa: BLE001
             self.log.error("could not read %s replicas: %s", cfg.worker_deployment_name, exc)
-            return
+            return                                   # never scale on a guessed count
 
         capacity = replicas * cfg.threads_per_worker
         self.history.append(Sample(now, pending, running, capacity))
         while self.history and now - self.history[0].ts > self._retain_s:
-            self.history.popleft()
+            self.history.popleft()                   # prune the sliding window
 
         target, reason = self._decide(now, replicas)
 
-        if target is not None and target != replicas:
+        if target is not None and target != replicas:   # idempotent: skip a no-op patch
             if cfg.dry_run:
                 self.log.info("DRY_RUN would scale %s %d -> %d (%s)",
                               cfg.worker_deployment_name, replicas, target, reason)
@@ -136,6 +170,8 @@ class Controller:
                     self.log.info("scaled %s %d -> %d (%s)",
                                   cfg.worker_deployment_name, replicas, target, reason)
                 except Exception as exc:  # noqa: BLE001
+                    # e.g. field-manager conflict with helm. Do NOT update
+                    # last_action_ts -> the patch is retried next tick.
                     self.log.error("scale patch failed: %s", exc)
                     return
             self.last_action_ts = now
@@ -143,6 +179,7 @@ class Controller:
         else:
             decision = reason
 
+        # One line per tick == `kubectl logs -f deploy/worker-scaler`.
         self.log.info(
             "pending=%.1f running=%.1f replicas=%d capacity=%d util=%.0f%% decision=%s",
             pending, running, replicas, capacity,
@@ -161,7 +198,7 @@ class Controller:
         while True:
             try:
                 self.tick()
-            except Exception as exc:  # noqa: BLE001 - never let one bad tick kill the loop
+            except Exception as exc:  # noqa: BLE001 - belt & suspenders: one bad tick must not kill the loop
                 self.log.exception("tick error: %s", exc)
             time.sleep(self.cfg.poll_interval_s)
 

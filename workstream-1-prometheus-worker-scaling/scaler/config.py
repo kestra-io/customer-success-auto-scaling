@@ -1,9 +1,21 @@
-"""Env-driven configuration for the worker scaler. Single source of truth for the knobs."""
+"""Env-driven configuration for the worker scaler.
+
+`Config` is the single source of truth for every knob. It is read **once** at
+process start (`from_env()`); nothing re-reads the environment afterwards. To
+change a value: edit the `worker-scaler-config` ConfigMap (rendered by
+`scripts/deploy-scaler.sh` from `.env` + `.state/metric-names.env`) and restart
+the Deployment.
+"""
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 
+
+# --- env parsers -----------------------------------------------------------------
+# Each takes (name, default) and returns the default on a missing OR unparseable
+# value, so a typo in the ConfigMap degrades to a safe default instead of
+# crashing the control loop on startup.
 
 def _s(name: str, default: str) -> str:
     return os.environ.get(name, default)
@@ -27,23 +39,32 @@ def _b(name: str, default: bool) -> bool:
     return os.environ.get(name, str(default)).strip().lower() in ("1", "true", "yes", "on")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True)  # frozen -> an immutable snapshot; pass it around freely
 class Config:
-    # In EE the kestra_worker_job_* gauges live only on each worker pod's
-    # own :8081. The scaler lists worker pods by label and scrapes each one.
+    # --- metric source ---------------------------------------------------------
+    # KESTRA EE exposes kestra_worker_job_* ONLY on each worker pod's own :8081
+    # (no cross-service aggregation), so the loop lists worker pods by label and
+    # scrapes each one.
     worker_label_selector: str
     worker_metrics_port: int
-    # Optional: scrape this single URL instead of discovering pods (compose / tests).
+    # If non-empty, scrape THIS one URL every tick and never call the pod API
+    # (used by the compose/ path and by unit tests). Empty => pod discovery.
     prometheus_url: str
 
+    # --- metric names (overridable in case a Kestra build renames them) -------
     metric_pending: str
     metric_running: str
     metric_threads: str
 
+    # --- scaling target ------------------------------------------------------
     namespace: str
     worker_deployment_name: str
+    # Must equal the Helm `workerThreads`. The scaler cannot read the worker's
+    # `--thread` arg, so this is how it knows per-replica capacity:
+    #   capacity = replicas * threads_per_worker
     threads_per_worker: int
 
+    # --- control-loop knobs (see controller.py) ----------------------------
     poll_interval_s: int
     scale_up_window_s: int
     scale_down_window_s: int
@@ -54,6 +75,7 @@ class Config:
     max_replicas: int
     cooldown_s: int
 
+    # --- ops ---------------------------------------------------------------
     dry_run: bool
     log_level: str
 
