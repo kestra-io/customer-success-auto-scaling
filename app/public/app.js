@@ -62,6 +62,27 @@ document.querySelectorAll('button[data-preset]').forEach((b) => {
 
 function fmt(v, d = 0) { return v == null ? '–' : Number(v).toFixed(d); }
 
+// ── refresh cue ──────────────────────────────────────────────────────────────
+// Flash the dot on every successful poll, and keep an "updated Ns ago" readout
+// ticking between polls so a stalled backend is obvious (age keeps climbing).
+let lastOkTs = 0;
+const SRC_LABEL = { scaler: 'scaler (all workers)', 'worker-metrics': 'one worker pod' };
+
+function pulse() {
+  const d = $('pulse');
+  d.classList.remove('beat');
+  void d.offsetWidth;          // restart the CSS animation
+  d.classList.add('beat');
+}
+
+function renderAge() {
+  const el = $('refresh-age');
+  if (!lastOkTs) return;
+  const secs = Math.round((Date.now() - lastOkTs) / 1000);
+  el.textContent = secs <= 1 ? 'updated just now' : `updated ${secs}s ago`;
+  el.classList.toggle('stale', secs > 8);   // > 4 missed polls
+}
+
 async function tick() {
   try {
     const s = await j('/api/stats');
@@ -79,11 +100,24 @@ async function tick() {
     $('s-fired').textContent = fmt(s.fired_total);
     document.querySelector('.stats').classList.toggle('over', (s.pending || 0) > 0 || (s.running || 0) >= cap);
     $('scrape-err').textContent = s.scrape_error ? `metrics: ${s.scrape_error}` : '';
+
+    const badge = $('src-badge');
+    badge.textContent = `source: ${SRC_LABEL[s.source] || s.source || '–'}`;
+    badge.classList.toggle('fallback', s.source !== 'scaler');
+    badge.title = s.source === 'scaler'
+      ? 'Authoritative: summed across every worker pod, real Deployment replica count.'
+      : 'Fallback scrape of a single worker pod — replica count and totals may be low during a spike. Run `make scaler`.';
+
+    lastOkTs = Date.now();
+    pulse();
+    renderAge();
   } catch (e) {
     $('scrape-err').textContent = e.message;
+    renderAge();               // keep the age climbing so a stall is visible
   }
 }
 
 loadConfig();
 tick();
 setInterval(tick, 2000);
+setInterval(renderAge, 1000);

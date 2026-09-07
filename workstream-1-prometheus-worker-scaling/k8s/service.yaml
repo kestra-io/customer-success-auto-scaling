@@ -1,0 +1,17 @@
+# Exposes the scaler's GET /state. The host port-forward (scripts/portforward.sh,
+# :8083) targets this so the trigger app can read the authoritative multi-worker
+# pending/running + replica count instead of a single-pod sample.
+apiVersion: v1
+kind: Service
+metadata:
+  name: worker-scaler
+  namespace: {{NAMESPACE}}
+  labels:
+    app: worker-scaler
+spec:
+  selector:
+    app: worker-scaler
+  ports:
+    - name: state
+      port: 8080
+      targetPort: state

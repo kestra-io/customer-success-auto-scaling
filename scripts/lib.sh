@@ -95,7 +95,8 @@ wait_for() {
 # Host-side endpoints, valid once portforward.sh has started the tunnels.
 KESTRA_HTTP="http://127.0.0.1:8080"          # webserver: API + UI
 KESTRA_MGMT="http://127.0.0.1:8081"          # webserver management: jdbc/queue metrics (NOT worker metrics)
-KESTRA_WORKER_MGMT="http://127.0.0.1:8082"   # worker management: kestra_worker_job_* (via svc/kestra-worker-metrics)
+KESTRA_WORKER_MGMT="http://127.0.0.1:8082"   # worker management: kestra_worker_job_* (via svc/kestra-worker-metrics, ONE pod)
+KESTRA_SCALER_STATE="http://127.0.0.1:8083"  # worker-scaler GET /state: authoritative multi-worker sum + replica count
 api()         { echo "${KESTRA_HTTP}/api/v1/${KESTRA_TENANT}$1"; }        # build a tenant-scoped API URL
 webhook_url() { echo "$(api "/executions/webhook/${FLOW_NAMESPACE}/${FLOW_ID}/${WEBHOOK_KEY}")"; }
 

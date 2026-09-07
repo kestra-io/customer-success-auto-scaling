@@ -25,7 +25,7 @@ from dataclasses import dataclass
 
 from .config import Config
 from .k8s import K8sClient
-from . import promscrape
+from . import promscrape, statehttp
 
 
 @dataclass
@@ -63,6 +63,12 @@ class Controller:
         self.last_action_ts = 0.0
         # Keep enough history for the longest window plus a margin.
         self._retain_s = max(cfg.scale_up_window_s, cfg.scale_down_window_s) + cfg.poll_interval_s * 2
+        # Published by the /state HTTP endpoint (see statehttp.py). None until the
+        # first successful tick.
+        self.last_state: dict | None = None
+
+    def state(self) -> dict | None:
+        return self.last_state
 
     def _scrape_workers(self) -> tuple[float, float] | None:
         """Sum (pending, running) across every worker pod. `None` => this tick
@@ -179,12 +185,27 @@ class Controller:
         else:
             decision = reason
 
+        util = (running / capacity) if capacity else 0.0
+
         # One line per tick == `kubectl logs -f deploy/worker-scaler`.
         self.log.info(
             "pending=%.1f running=%.1f replicas=%d capacity=%d util=%.0f%% decision=%s",
-            pending, running, replicas, capacity,
-            (running / capacity * 100) if capacity else 0.0, decision,
+            pending, running, replicas, capacity, util * 100, decision,
         )
+
+        # Publish for the /state endpoint (the trigger app's authoritative source).
+        self.last_state = {
+            "ts": time.time(),
+            "pending": pending,
+            "running": running,
+            "worker_replicas": replicas,
+            "threads_per_worker": cfg.threads_per_worker,
+            "concurrent_capacity": capacity,
+            "utilization": round(util, 3),
+            "decision": decision,
+            "min_replicas": cfg.min_replicas,
+            "max_replicas": cfg.max_replicas,
+        }
 
     def run(self) -> None:
         self.log.info(
@@ -210,7 +231,9 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
     k8s = K8sClient(cfg.namespace, cfg.worker_deployment_name, cfg.worker_label_selector)
-    Controller(cfg, k8s).run()
+    ctrl = Controller(cfg, k8s)
+    statehttp.start(cfg.state_http_port, ctrl.state)   # non-blocking daemon thread
+    ctrl.run()
 
 
 if __name__ == "__main__":

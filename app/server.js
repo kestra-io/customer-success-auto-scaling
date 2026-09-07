@@ -12,6 +12,11 @@ const env = process.env;
 const CFG = {
   kestraBase: (env.KESTRA_BASE_URL || 'http://host.docker.internal:8080').replace(/\/$/, ''),
   kestraMgmt: (env.KESTRA_MGMT_URL || 'http://host.docker.internal:8082').replace(/\/$/, ''),
+  // Authoritative source: the scaler sums kestra_worker_job_* across EVERY worker
+  // pod and reads the real Deployment replica count. Preferred over kestraMgmt,
+  // whose port-forward pins to ONE worker pod so it can never see the count change.
+  // Empty = not wired up (compose quickstart, or `make scaler` not run yet).
+  scalerState: (env.SCALER_STATE_URL || '').replace(/\/$/, ''),
   tenant: env.KESTRA_TENANT || 'main',
   ns: env.FLOW_NAMESPACE || 'company.autoscaling',
   flow: env.FLOW_ID || 'webhook_sleep',
@@ -79,7 +84,51 @@ function sumMetric(text, name) {
   return seen ? sum : null;
 }
 
-async function getStats() {
+// The always-present half of /api/stats: the trigger-loop counters.
+function loopStats() {
+  return {
+    rate_per_min: state.ratePerMin,
+    fired_total: state.firedTotal,
+    error_total: state.errorTotal,
+  };
+}
+
+// Preferred path: the scaler's /state — one JSON blob with the cross-pod sums and
+// the true replica count already computed. Returns null (and lets getStats fall
+// back to the scrape) on any error or before the scaler's first tick (503).
+async function fetchScalerState() {
+  if (!CFG.scalerState) return null;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch(`${CFG.scalerState}`, { signal: ctrl.signal });
+    clearTimeout(t);
+    if (!res.ok) return null;                      // 503 until first tick
+    const d = await res.json();
+    if (d == null || typeof d.worker_replicas !== 'number') return null;
+    return {
+      ts: new Date().toISOString(),
+      source: 'scaler',
+      pending: d.pending ?? null,
+      running: d.running ?? null,
+      threads_total: (d.worker_replicas ?? 0) * (d.threads_per_worker ?? CFG.threadsPerWorker),
+      worker_replicas: d.worker_replicas,
+      threads_per_worker: d.threads_per_worker ?? CFG.threadsPerWorker,
+      concurrent_capacity: d.concurrent_capacity ?? d.worker_replicas * CFG.threadsPerWorker,
+      utilization: d.utilization ?? null,
+      decision: d.decision ?? null,
+      state_age_s: d.ts ? +(Date.now() / 1000 - d.ts).toFixed(1) : null,
+      scrape_error: null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+// Fallback path: scrape one worker pod's /prometheus (via the :8082 port-forward).
+// Correct at 1 replica; during a spike it undercounts and worker_replicas is
+// stuck at 1 (the port-forward only ever hits one pod) — hence the scaler path.
+async function scrapeStats() {
   let pending = null, running = null, threads = null, err = null;
   try {
     const ctrl = new AbortController();
@@ -99,6 +148,7 @@ async function getStats() {
   const capacity = workerReplicas * CFG.threadsPerWorker;
   return {
     ts: new Date().toISOString(),
+    source: 'worker-metrics',
     pending,
     running,
     threads_total: threads,
@@ -106,11 +156,15 @@ async function getStats() {
     threads_per_worker: CFG.threadsPerWorker,
     concurrent_capacity: capacity,
     utilization: running != null ? +(running / capacity).toFixed(3) : null,
-    rate_per_min: state.ratePerMin,
-    fired_total: state.firedTotal,
-    error_total: state.errorTotal,
+    decision: null,
+    state_age_s: null,
     scrape_error: err,
   };
+}
+
+async function getStats() {
+  const core = (await fetchScalerState()) || (await scrapeStats());
+  return { ...core, ...loopStats() };
 }
 
 // ── http ────────────────────────────────────────────────────────────────────
@@ -179,6 +233,7 @@ const server = http.createServer(async (req, res) => {
 server.listen(CFG.port, () => {
   console.log(`[trigger-app] listening on :${CFG.port}`);
   console.log(`[trigger-app] webhook  -> ${webhookUrl()}`);
-  console.log(`[trigger-app] metrics  <- ${CFG.kestraMgmt}/prometheus`);
+  console.log(`[trigger-app] stats    <- ${CFG.scalerState ? `${CFG.scalerState} (scaler, preferred)` : '(scaler /state not configured)'}`);
+  console.log(`[trigger-app] fallback <- ${CFG.kestraMgmt}/prometheus`);
   console.log(`[trigger-app] rates    -> baseline=${CFG.rates.baseline} spike=${CFG.rates.spike} drop=${CFG.rates.drop} (per min)`);
 });

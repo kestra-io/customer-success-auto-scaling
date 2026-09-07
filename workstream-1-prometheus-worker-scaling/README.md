@@ -39,10 +39,18 @@ So the scaler:
    many replicas are reporting.
 
 (The chart also creates a `kestra-worker-metrics` ClusterIP Service selecting the
-worker pods. That is **not** used by the scaler — it's for the host-side
-`:8082` port-forward that the trigger app's `/stats` readout reads. `kubectl
-port-forward` pins to one endpoint, so the app's numbers are a single-worker
-sample; the scaler is the authoritative sum.)
+worker pods, exposed on the host `:8082`)
+
+### `GET /state` — authoritative readout for the trigger app
+
+`statehttp.py` runs a stdlib HTTP thread inside the scaler pod. Every tick
+publishes the observation it just computed — the cross-pod `pending`/`running`
+sum and the real Deployment replica count — as JSON on `STATE_HTTP_PORT`
+(default `8080`; `503` until the first tick). `k8s/service.yaml` fronts it as
+`svc/worker-scaler`, and `scripts/portforward.sh` forwards it to host `:8083`.
+The trigger app's `/api/stats` prefers `SCALER_STATE_URL` and shows a
+`source: scaler` badge; if the scaler isn't deployed it falls back to the
+single-pod `:8082` scrape and the badge turns amber.
 
 ## Prerequisite: cap Kestra's JDBC queue `poll-size`
 
@@ -117,6 +125,7 @@ from the repo-root `.env` + `.state/metric-names.env`.
 | `COOLDOWN_SECONDS` | `90` | quiet period after any scale action |
 | `DRY_RUN` | `false` | log decisions, don't patch |
 | `LOG_LEVEL` | `INFO` | |
+| `STATE_HTTP_PORT` | `8080` | port for `GET /state` (`0` disables it) |
 
 ## Run
 

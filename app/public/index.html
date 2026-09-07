@@ -12,6 +12,14 @@
     <p class="sub">Fires the <code id="flow-name">…</code> webhook at a controllable rate.
        Watch <code>pending</code> vs. <code>capacity</code> below.</p>
 
+    <div class="statusline">
+      <span class="src" id="src-badge" title="where the numbers below come from">source: –</span>
+      <span class="refresh">
+        <i class="dot" id="pulse"></i>
+        <span id="refresh-age">connecting…</span>
+      </span>
+    </div>
+
     <section class="card">
       <div class="row">
         <button data-preset="drop">Drop</button>
@@ -48,8 +56,10 @@
       <p class="hint" id="scrape-err"></p>
     </section>
 
-    <p class="foot">Numbers lag reality by up to ~30–60&nbsp;s (Kestra re-aggregates worker
-       metrics on a 30&nbsp;s timer). Give each change ~90&nbsp;s to settle.</p>
+    <p class="foot">The panel refreshes every 2&nbsp;s, but a scale action takes time to
+       show: the scaler polls on a ~15&nbsp;s loop, holds a 90&nbsp;s cooldown after each
+       change, and a new worker pod needs ~30–60&nbsp;s to start and register its threads.
+       Allow ~2&nbsp;min after hitting a preset before reading the result.</p>
   </main>
   <script src="/app.js"></script>
 </body>

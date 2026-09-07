@@ -1,18 +1,22 @@
 #!/usr/bin/env bash
-# Manage two background `kubectl port-forward` tunnels on 127.0.0.1:
-#   8080 -> webserver http   (Kestra API + UI)          via svc/<webserver>
-#   8081 -> webserver mgmt   (webserver /prometheus)    via svc/<webserver>
-#   8082 -> worker  mgmt     (kestra_worker_job_*)       via svc/kestra-worker-metrics
+# Manage background `kubectl port-forward` tunnels on 127.0.0.1:
+#   8080 -> webserver http   (Kestra API + UI)           via svc/<webserver>
+#   8081 -> webserver mgmt   (webserver /prometheus)     via svc/<webserver>
+#   8082 -> worker  mgmt     (kestra_worker_job_*)        via svc/kestra-worker-metrics
+#   8083 -> worker-scaler    (GET /state, authoritative)  via svc/worker-scaler   [if deployed]
 #
 #   portforward.sh start | stop | status
 #
 # `kubectl port-forward svc/X` pins to ONE endpoint pod; if that pod is replaced
-# the tunnel dies. Re-run `start` to re-establish (idempotent).
+# the tunnel dies. Re-run `start` to re-establish (idempotent). This is exactly
+# why :8082 can't tell the trigger app the real replica count — it only ever
+# sees one worker pod — and why the scaler's own :8083/state exists.
 source "$(dirname "$0")/lib.sh"
 load_env
 
 WS_PID="$STATE_DIR/portforward-ws.pid"    # webserver tunnel pid
 WK_PID="$STATE_DIR/portforward-wk.pid"    # worker-metrics tunnel pid
+SC_PID="$STATE_DIR/portforward-sc.pid"    # worker-scaler /state tunnel pid
 
 # true if the pid file exists and that process is alive.
 _running() { [[ -f "$1" ]] && kill -0 "$(cat "$1")" 2>/dev/null; }
@@ -40,11 +44,19 @@ start() {
   else
     warn "svc/kestra-worker-metrics not found — run 'helm upgrade' (via make up); worker metrics on :8082 unavailable"
   fi
+
+  # The scaler's /state endpoint — only exists after `make scaler` (deploy-scaler.sh
+  # creates svc/worker-scaler). The trigger app prefers this over the :8082 scrape.
+  if kctl get svc worker-scaler >/dev/null 2>&1; then
+    _pf "$SC_PID" portforward-sc "svc/worker-scaler" "http://127.0.0.1:8083/state" 8083:8080
+  else
+    warn "svc/worker-scaler not found — run 'make scaler'; the app will fall back to the :8082 single-pod scrape"
+  fi
   ok "port-forwards up. If one drops mid-demo, re-run: scripts/portforward.sh start"
 }
 
 stop() {
-  for f in "$WS_PID" "$WK_PID"; do
+  for f in "$WS_PID" "$WK_PID" "$SC_PID"; do
     [[ -f "$f" ]] || continue
     kill "$(cat "$f")" 2>/dev/null || true
     rm -f "$f"

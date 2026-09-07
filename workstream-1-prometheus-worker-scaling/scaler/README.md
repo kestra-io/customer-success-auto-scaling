@@ -18,6 +18,7 @@ it, see `../README.md`.
 | `promscrape.py` | Fetch a Prometheus endpoint and sum a metric across its series | stdlib only (`urllib`, `re`) |
 | `k8s.py` | Read/patch the Deployment scale; list worker pod scrape URLs | `kubernetes` client |
 | `controller.py` | The control loop: observe → decide → act → log | the three above |
+| `statehttp.py` | Serve the last tick's observation as JSON at `GET /state` | stdlib only (`http.server`) |
 | `__init__.py` | Package marker | — |
 
 Entry point: `python -m scaler.controller` → `controller.main()`
@@ -28,6 +29,7 @@ main()
  ├─ Config.from_env()                      # snapshot env
  ├─ logging.basicConfig(level=cfg.log_level)
  ├─ K8sClient(ns, deployment, selector)    # load_incluster_config()
+ ├─ statehttp.start(cfg.state_http_port, ctrl.state)   # daemon thread, GET /state
  └─ Controller(cfg, k8s).run()
        └─ loop forever:
             tick()            # one observe/decide/act cycle
@@ -277,9 +279,14 @@ never thrashes (cooldown + sustained windows).
 - **Scrape a fixed endpoint** (no pod API / no RBAC on pods) — set
   `PROMETHEUS_URL` to a single aggregating URL; `worker_metrics_urls` is then
   never called.
-- **Expose state to the trigger app** — add a stdlib `http.server` thread in
-  `run()` serving the last `Sample` as JSON, so the app's `/stats` can show the
-  authoritative multi-worker sum instead of a single-pod port-forward sample.
+- **`GET /state`** (`statehttp.py`) — each `tick()` publishes its observation to
+  `Controller.last_state`; a daemon `http.server` thread serves it as JSON on
+  `STATE_HTTP_PORT` (503 until the first tick). `svc/worker-scaler` +
+  `scripts/portforward.sh` (`:8083`) expose it so the trigger app reads the
+  authoritative cross-pod sum + real replica count instead of a single-pod
+  `:8082` scrape (a `port-forward svc/...` pins to one worker pod). To add a
+  field, extend the dict in `tick()` — no schema, the app treats keys as
+  optional.
 - **Unit tests** — `_decide`, `_covered`, and `promscrape.sum_metric` are pure
   functions of their inputs; construct `Sample`s with fake `ts` values and a
   `Controller(cfg, k8s=None)` (nothing in `_decide` touches `k8s`).

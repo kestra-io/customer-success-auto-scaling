@@ -23,6 +23,9 @@ spec:
           envFrom:
             - configMapRef:
                 name: worker-scaler-config       # rendered by scripts/deploy-scaler.sh
+          ports:
+            - name: state
+              containerPort: 8080                # GET /state (see statehttp.py); STATE_HTTP_PORT
           resources:
             requests:
               cpu: 25m

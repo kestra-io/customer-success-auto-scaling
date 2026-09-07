@@ -8,10 +8,13 @@ services:
       - "${APP_PORT:-5173}:5173"
     environment:
       # Kestra is reached on the host via the background `kubectl port-forward`s
-      # started by scripts/up.sh:
-      #   8080 = webserver API   8082 = worker metrics (kestra_worker_job_*)
+      # started by scripts/up.sh + scripts/deploy-scaler.sh:
+      #   8080 = webserver API   8082 = worker metrics (ONE pod)   8083 = scaler /state
       KESTRA_BASE_URL: "http://host.docker.internal:8080"
       KESTRA_MGMT_URL: "http://host.docker.internal:8082"
+      # Authoritative stats source (all workers + real replica count). If the
+      # scaler isn't deployed yet the app falls back to the :8082 scrape.
+      SCALER_STATE_URL: "${SCALER_STATE_URL:-http://host.docker.internal:8083/state}"
       KESTRA_TENANT: "${KESTRA_TENANT:-main}"
       FLOW_NAMESPACE: "${FLOW_NAMESPACE:-company.autoscaling}"
       FLOW_ID: "${FLOW_ID:-webhook_sleep}"

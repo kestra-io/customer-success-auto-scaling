@@ -78,6 +78,11 @@ class Config:
     # --- ops ---------------------------------------------------------------
     dry_run: bool
     log_level: str
+    # Serve the last computed observation as JSON at GET /state on this port so
+    # the trigger app can show the AUTHORITATIVE multi-worker sum + replica count
+    # (a host `kubectl port-forward svc/...` only ever hits one worker pod).
+    # 0 disables the endpoint.
+    state_http_port: int
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -106,4 +111,5 @@ class Config:
             cooldown_s=_i("COOLDOWN_SECONDS", 90),
             dry_run=_b("DRY_RUN", False),
             log_level=_s("LOG_LEVEL", "INFO").upper(),
+            state_http_port=_i("STATE_HTTP_PORT", 8080),
         )

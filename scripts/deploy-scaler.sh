@@ -22,10 +22,10 @@ docker build -t "$IMAGE" "$WS1"
 log "kind load $IMAGE"
 kind load docker-image "$IMAGE" --name "$KIND_CLUSTER_NAME"   # copy into the node's containerd
 
-log "apply RBAC"
+log "apply RBAC + Service"
 # The k8s manifests carry a {{NAMESPACE}} placeholder (kubectl -n can't set
 # metadata.namespace or a RoleBinding subject namespace).
-for m in serviceaccount role rolebinding; do
+for m in serviceaccount role rolebinding service; do
   sed "s/{{NAMESPACE}}/${K8S_NAMESPACE}/g" "$WS1/k8s/${m}.yaml" | kctl apply -f -
 done
 
@@ -64,11 +64,16 @@ kctl create configmap worker-scaler-config \
   --from-literal=COOLDOWN_SECONDS="${COOLDOWN_SECONDS:-90}" \
   --from-literal=DRY_RUN="${SCALER_DRY_RUN:-false}" \
   --from-literal=LOG_LEVEL="${SCALER_LOG_LEVEL:-INFO}" \
+  --from-literal=STATE_HTTP_PORT="${STATE_HTTP_PORT:-8080}" \
   --dry-run=client -o yaml | kctl apply -f -
 
 sed "s/{{NAMESPACE}}/${K8S_NAMESPACE}/g" "$WS1/k8s/deployment.yaml" | kctl apply -f -
 # Fast: the image is python:3.12-slim + one file, already `kind load`ed above.
 kctl rollout status deploy/worker-scaler --timeout=180s
+
+# Add the :8083 -> svc/worker-scaler port-forward so the trigger app can read
+# /state (idempotent — leaves the existing 8080/8082 tunnels alone).
+"$HERE/portforward.sh" start
 
 ok "scaler deployed. Watch it:  kubectl -n ${K8S_NAMESPACE} logs -f deploy/worker-scaler"
 ok "Now drive load from the trigger app and watch:  kubectl -n ${K8S_NAMESPACE} get deploy ${WORKER_DEPLOYMENT_NAME} -w"
