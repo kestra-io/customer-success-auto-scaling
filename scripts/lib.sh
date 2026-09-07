@@ -70,3 +70,13 @@ KESTRA_HTTP="http://127.0.0.1:8080"
 KESTRA_MGMT="http://127.0.0.1:8081"
 api() { echo "${KESTRA_HTTP}/api/v1/${KESTRA_TENANT}$1"; }
 webhook_url() { echo "$(api "/executions/webhook/${FLOW_NAMESPACE}/${FLOW_ID}/${WEBHOOK_KEY}")"; }
+
+# curl against the authenticated data/management API (basic auth). The webhook
+# and :8081/prometheus are anonymous and should use plain curl.
+kcurl() {
+  if [[ -n "${KESTRA_ADMIN_USER:-}" ]]; then
+    curl -u "${KESTRA_ADMIN_USER}:${KESTRA_ADMIN_PASSWORD}" "$@"
+  else
+    curl "$@"
+  fi
+}

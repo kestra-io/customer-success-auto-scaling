@@ -30,6 +30,7 @@ render_values() {
   cp "$src" "$out"
   for v in KESTRA_IMAGE_REPO KESTRA_IMAGE_TAG POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD \
            KESTRA_JDBC_SECRET KESTRA_ENCRYPTION_SECRET_KEY KESTRA_JWT_SECRET \
+           KESTRA_ADMIN_USER KESTRA_ADMIN_PASSWORD \
            KESTRA_EE_LICENSE_ID KESTRA_EE_LICENSE_FINGERPRINT KESTRA_EE_LICENSE_KEY; do
     # value may contain / and & (base64 license key) -> use a non-/ delimiter and escape &
     local val="${!v-}"

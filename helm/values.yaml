@@ -1,21 +1,30 @@
 # Distributed Kestra for the auto-scaling example.
 #
-# Rendered by scripts/up.sh through `envsubst` with an EXPLICIT variable list, so
-# only the ${...} tokens below are replaced (Kestra's own ${...} refs, if any,
-# are left intact). This committed file contains NO secrets — the image-pull
-# secret is created imperatively by scripts/create-secrets.sh; license + internal
-# secrets come from .env at render time.
+# Rendered by scripts/up.sh through a small sed pass (no envsubst dependency) that
+# substitutes ONLY the ${...} tokens below. This committed file contains NO
+# secrets — the image-pull secret is created imperatively by
+# scripts/create-secrets.sh; the license + internal secrets come from .env at
+# render time into the kestra-sensitive Secret.
 #
 # Trim of ../../infra/my-kestra/values.yaml with three deliberate changes:
-#   * kestra.server.basicAuth.enabled: false   (demo: open UI / webhook / /prometheus)
+#   * basic auth ON with demo creds (${KESTRA_ADMIN_USER}) + matching super-admin.
+#     EE keeps an auth layer regardless of the OSS basicAuth flag, so we use known
+#     creds rather than fighting it. The webhook (URL-keyed) and :8081/prometheus
+#     stay anonymous; only the data/management API and the UI need the creds.
 #   * deployments.worker.workerThreads: 4      (deterministic concurrency ceiling)
 #   * dind.enabled: false                      (Sleep needs no runner; faster pods)
+#
+# IMPORTANT: the whole Kestra config lives in the kestra-sensitive Secret's
+# KESTRA_CONFIGURATION value, NOT in `configurations.application`. The image's
+# /app/kestra launcher, when KESTRA_CONFIGURATION is set, writes it to
+# /app/confs/application.yml and forces MICRONAUT_CONFIG_FILES to point there,
+# which would otherwise clobber the chart's own config file.
 
 image:
   repository: ${KESTRA_IMAGE_REPO}
   tag: "${KESTRA_IMAGE_TAG}"
 
-# Rendered only for the EE image; scripts/up.sh strips this block for OSS.
+# Rendered only for the EE image; scripts/up.sh sets imagePullSecrets=[] for OSS.
 imagePullSecrets:
   - name: kestra-registry
 
@@ -69,23 +78,15 @@ service:
 ingress:
   enabled: false
 
+# The chart requires configurations.application to be non-empty, but at runtime
+# /app/kestra forces MICRONAUT_CONFIG_FILES to /app/confs/application.yml (built
+# from KESTRA_CONFIGURATION), so this stub is never actually read. The real
+# config is the KESTRA_CONFIGURATION value in the kestra-sensitive Secret below.
 configurations:
   application:
     kestra:
-      queue:
-        type: postgres
-      repository:
-        type: postgres
-      storage:
-        type: local
-        local:
-          base-path: "/app/storage"
-    datasources:
-      postgres:
-        url: jdbc:postgresql://kestra-postgres:5432/kestra
-        driverClassName: org.postgresql.Driver
-        username: ${POSTGRES_USER}
-        password: ${POSTGRES_PASSWORD}
+      anonymousUsageReport:
+        enabled: false
 
 common:
   extraEnvFrom:
@@ -93,7 +94,9 @@ common:
         name: kestra-sensitive
 
 extraManifests:
-  # Sensitive Kestra config (rendered from .env at bring-up).
+  # The COMPLETE Kestra configuration (rendered from .env at bring-up).
+  # /app/kestra writes this to /app/confs/application.yml and points
+  # MICRONAUT_CONFIG_FILES at it.
   - apiVersion: v1
     kind: Secret
     metadata:
@@ -103,7 +106,23 @@ extraManifests:
         kestra:
           server:
             basicAuth:
-              enabled: false
+              enabled: true
+              username: "${KESTRA_ADMIN_USER}"
+              password: "${KESTRA_ADMIN_PASSWORD}"
+          security:
+            super-admin:
+              username: "${KESTRA_ADMIN_USER}"
+              password: "${KESTRA_ADMIN_PASSWORD}"
+              tenant-admin-access:
+                - main
+          repository:
+            type: postgres
+          queue:
+            type: postgres
+          storage:
+            type: local
+            local:
+              base-path: "/app/storage"
           secret:
             type: jdbc
             jdbc:
@@ -117,6 +136,12 @@ extraManifests:
               key: "${KESTRA_EE_LICENSE_KEY}"
           anonymousUsageReport:
             enabled: false
+        datasources:
+          postgres:
+            url: jdbc:postgresql://kestra-postgres:5432/kestra
+            driverClassName: org.postgresql.Driver
+            username: ${POSTGRES_USER}
+            password: ${POSTGRES_PASSWORD}
         micronaut:
           security:
             token:

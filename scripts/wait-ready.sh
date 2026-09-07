@@ -22,5 +22,5 @@ else
   warn "worker command did not show --thread=${WORKER_THREADS}; got: ${wcmd:-<empty>}"
 fi
 
-wait_for "Kestra API" 240 bash -c "curl -fsS '$(api "/flows/search?size=1")' -o /dev/null"
+wait_for "Kestra API" 240 bash -c "curl -fsS ${KESTRA_ADMIN_USER:+-u '${KESTRA_ADMIN_USER}:${KESTRA_ADMIN_PASSWORD}'} '$(api "/flows/search?size=1")' -o /dev/null"
 ok "Kestra API is answering at ${KESTRA_HTTP}"
