@@ -6,7 +6,7 @@ load_env
 log "waiting for postgres StatefulSet"
 kctl rollout status statefulset/kestra-postgres --timeout=300s
 
-for c in webserver executor indexer scheduler worker; do
+for c in webserver executor scheduler worker; do
   dep="$(kestra_deploy "$c")"
   [[ -n "$dep" ]] || die "could not find the '$c' deployment by label"
   log "waiting for deployment/${dep}"

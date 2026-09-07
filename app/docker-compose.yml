@@ -7,10 +7,11 @@ services:
     ports:
       - "${APP_PORT:-5173}:5173"
     environment:
-      # Kestra is reached on the host via the background `kubectl port-forward`
-      # started by scripts/up.sh (8080 = API, 8081 = management/prometheus).
+      # Kestra is reached on the host via the background `kubectl port-forward`s
+      # started by scripts/up.sh:
+      #   8080 = webserver API   8082 = worker metrics (kestra_worker_job_*)
       KESTRA_BASE_URL: "http://host.docker.internal:8080"
-      KESTRA_MGMT_URL: "http://host.docker.internal:8081"
+      KESTRA_MGMT_URL: "http://host.docker.internal:8082"
       KESTRA_TENANT: "${KESTRA_TENANT:-main}"
       FLOW_NAMESPACE: "${FLOW_NAMESPACE:-company.autoscaling}"
       FLOW_ID: "${FLOW_ID:-webhook_sleep}"

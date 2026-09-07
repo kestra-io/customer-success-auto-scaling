@@ -1,17 +1,23 @@
 #!/usr/bin/env bash
-# Curl :8081/prometheus, confirm the worker queue metrics exist, and record their
-# exact names in .state/metric-names.env for the app + scaler to consume.
+# Scrape a worker's :8081/prometheus (via the :8082 port-forward to
+# svc/kestra-worker-metrics), confirm the worker queue metrics exist, and record
+# their exact names in .state/metric-names.env for the app + scaler to consume.
 #
-# On v1.3.24 the expected names are kestra_worker_job_pending / _running / _thread.
-# A future rename (seen on `develop`) would be kestra_worker_pending_count etc.
+# In EE kestra_worker_job_pending / _running / _thread are exposed ONLY on
+# each worker pod's own :8081 — not on the webserver.
 source "$(dirname "$0")/lib.sh"
 load_env
 
-PROM="$STATE_DIR/prometheus.txt"
-log "scraping ${KESTRA_MGMT}/prometheus"
-curl -fsS "${KESTRA_MGMT}/prometheus" -o "$PROM" || die "could not reach ${KESTRA_MGMT}/prometheus (port-forward up? basic auth off?)"
+PROM="$STATE_DIR/prometheus-worker.txt"
+log "scraping ${KESTRA_WORKER_MGMT}/prometheus (worker metrics)"
+if ! curl -fsS "${KESTRA_WORKER_MGMT}/prometheus" -o "$PROM"; then
+  warn "port-forward :8082 not up — trying a worker pod directly via kubectl exec"
+  wp="$(kctl get pod -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}')"
+  [[ -n "$wp" ]] || die "no worker pod found"
+  kctl exec "$wp" -- sh -c 'curl -s http://localhost:8081/prometheus' > "$PROM" || die "could not scrape worker $wp"
+fi
 
-pick() {  # pick <preferred> <fallback-regex>
+pick() {  # pick <preferred> <substr>
   local pref="$1" rx="$2" hit
   if grep -qE "^${pref}(\{|[[:space:]])" "$PROM"; then echo "$pref"; return; fi
   hit="$(grep -oE "^kestra_worker_[a-z_]*${rx}[a-z_]*" "$PROM" | head -1 || true)"
@@ -30,12 +36,12 @@ M_THREADS="$(pick "${METRIC_THREADS:-kestra_worker_job_thread}"  'thread')"
 } > "$STATE_DIR/metric-names.env"
 
 echo
-grep -E "^(${M_PENDING}|${M_RUNNING}|${M_THREADS})(\{|[[:space:]])" "$PROM" || {
-  warn "none of the expected worker metrics are present yet."
-  warn "run at least one execution, wait ~30s (webserver re-aggregates on a 30s timer), and retry."
-  grep -E '^kestra_worker_' "$PROM" | sed 's/^/  seen: /' | head -30 || true
+if grep -E "^(${M_PENDING}|${M_RUNNING}|${M_THREADS})(\{|[[:space:]])" "$PROM"; then
+  echo
+  ok "metric names pinned -> $STATE_DIR/metric-names.env"
+  cat "$STATE_DIR/metric-names.env"
+else
+  warn "expected worker metrics not found. Present kestra_worker_* series:"
+  grep -oE '^kestra_worker_[a-z_]+' "$PROM" | sort -u | sed 's/^/  /' | head -30
   exit 1
-}
-echo
-ok "metric names pinned -> $STATE_DIR/metric-names.env"
-cat "$STATE_DIR/metric-names.env"
+fi

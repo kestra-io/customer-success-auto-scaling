@@ -11,10 +11,11 @@ IMAGE="kestra-autoscaling/worker-scaler:local"
 
 WORKER_DEPLOYMENT_NAME="$(kestra_deploy worker)"
 [[ -n "$WORKER_DEPLOYMENT_NAME" ]] || die "could not find the worker deployment by label"
-WEBSERVER_SVC="$(kestra_webserver_svc)"
-[[ -n "$WEBSERVER_SVC" ]] || die "could not find the webserver service by label"
-PROM_URL="http://${WEBSERVER_SVC}.${K8S_NAMESPACE}.svc:8081/prometheus"
-log "worker deployment: ${WORKER_DEPLOYMENT_NAME}   prometheus: ${PROM_URL}"
+# Each worker emits metrics on its own :8081, so the
+# scaler discovers worker pods by label and scrapes them directly (PROMETHEUS_URL
+# left empty = discovery mode).
+WORKER_SELECTOR="app.kubernetes.io/name=kestra,app.kubernetes.io/component=worker"
+log "worker deployment: ${WORKER_DEPLOYMENT_NAME}   scrape: pods matching '${WORKER_SELECTOR}' :8081"
 
 log "build $IMAGE"
 docker build -t "$IMAGE" "$WS1"
@@ -33,7 +34,9 @@ kctl auth can-i patch deployments/scale \
 
 log "render + apply scaler config"
 kctl create configmap worker-scaler-config \
-  --from-literal=PROMETHEUS_URL="$PROM_URL" \
+  --from-literal=PROMETHEUS_URL="" \
+  --from-literal=WORKER_LABEL_SELECTOR="$WORKER_SELECTOR" \
+  --from-literal=WORKER_METRICS_PORT="8081" \
   --from-literal=METRIC_PENDING="${METRIC_PENDING:-kestra_worker_job_pending}" \
   --from-literal=METRIC_RUNNING="${METRIC_RUNNING:-kestra_worker_job_running}" \
   --from-literal=METRIC_THREADS="${METRIC_THREADS:-kestra_worker_job_thread}" \

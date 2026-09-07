@@ -10,3 +10,7 @@ rules:
   - apiGroups: ["apps"]
     resources: ["deployments/scale"]
     verbs: ["get", "patch", "update"]
+  # discover worker pod IPs to scrape their :8081/prometheus directly
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]

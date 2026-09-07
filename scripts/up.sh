@@ -40,18 +40,19 @@ render_values() {
 }
 render_values "$ROOT/helm/values.yaml" "$RENDERED"
 
-HELM_ARGS=(upgrade --install "$HELM_RELEASE" kestra/kestra -n "$K8S_NAMESPACE" --create-namespace -f "$RENDERED" --wait --timeout 10m)
+# --wait can time out on the slow first EE image pull; wait-ready.sh re-checks.
+HELM_ARGS=(upgrade --install "$HELM_RELEASE" kestra/kestra -n "$K8S_NAMESPACE" --create-namespace -f "$RENDERED" --wait --timeout 12m)
 [[ -n "${HELM_CHART_VERSION:-}" ]] && HELM_ARGS+=(--version "$HELM_CHART_VERSION")
 [[ "$IS_EE" == "true" ]] || HELM_ARGS+=(--set-json 'imagePullSecrets=[]')
 
 log "helm ${HELM_ARGS[*]}"
-helm --kube-context "$KCTX" "${HELM_ARGS[@]}"
+helm --kube-context "$KCTX" "${HELM_ARGS[@]}" || warn "helm --wait returned non-zero (slow pull?) — wait-ready.sh will confirm"
 
-# 6. readiness
-"$HERE/wait-ready.sh" || true   # wait-ready re-checks; helm --wait already blocked
-
-# 7. port-forward (background)
+# 6. port-forward first (wait-ready + import + verify all talk to 127.0.0.1)
 "$HERE/portforward.sh" start
+
+# 7. readiness (rollouts + API)
+"$HERE/wait-ready.sh"
 
 # 8. flow import + smoke
 "$HERE/import-flow.sh"

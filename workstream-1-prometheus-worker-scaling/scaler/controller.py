@@ -5,9 +5,11 @@ Scale DOWN when `running` stays <= ratio * capacity AND `pending` == 0 for a
            longer sustained window.
 Respects MIN/MAX replicas, a fixed step, and a cooldown after any action.
 
+In EE there is no cross-service metric aggregation, so the loop lists the
+worker pods and scrapes each pod's own :8081/prometheus, then sums.
+
 This is deliberately a small, readable control loop rather than KEDA/HPA so the
-logic is explicit and every knob is a plain env var. KEDA's Prometheus scaler +
-HPA `behavior` stabilization windows are the production-grade equivalent.
+logic is explicit and every knob is a plain env var.
 """
 from __future__ import annotations
 
@@ -17,7 +19,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from .config import Config
-from .k8s import WorkerScaleClient
+from .k8s import K8sClient
 from . import promscrape
 
 
@@ -35,13 +37,49 @@ def _covered(samples: list[Sample], window_s: float, poll_s: float) -> bool:
 
 
 class Controller:
-    def __init__(self, cfg: Config, k8s: WorkerScaleClient) -> None:
+    def __init__(self, cfg: Config, k8s: K8sClient) -> None:
         self.cfg = cfg
         self.k8s = k8s
         self.log = logging.getLogger("scaler")
         self.history: deque[Sample] = deque()
         self.last_action_ts = 0.0
         self._retain_s = max(cfg.scale_up_window_s, cfg.scale_down_window_s) + cfg.poll_interval_s * 2
+
+    def _scrape_workers(self) -> tuple[float, float] | None:
+        """Sum pending + running across every worker pod. None if nothing scrapeable."""
+        cfg = self.cfg
+        if cfg.prometheus_url:
+            urls = [cfg.prometheus_url]
+        else:
+            try:
+                urls = self.k8s.worker_metrics_urls(cfg.worker_metrics_port)
+            except Exception as exc:  # noqa: BLE001
+                self.log.warning("could not list worker pods: %s", exc)
+                return None
+        if not urls:
+            self.log.warning("no Ready worker pods to scrape")
+            return None
+
+        pending = running = 0.0
+        ok = 0
+        for url in urls:
+            try:
+                text = promscrape.fetch(url, timeout=4.0)
+            except Exception as exc:  # noqa: BLE001 - a rolling pod can refuse briefly
+                self.log.debug("scrape %s failed: %s", url, exc)
+                continue
+            p = promscrape.sum_metric(text, cfg.metric_pending)
+            r = promscrape.sum_metric(text, cfg.metric_running)
+            if p is None or r is None:
+                self.log.warning("metrics %s/%s not found at %s",
+                                 cfg.metric_pending, cfg.metric_running, url)
+                continue
+            pending += p
+            running += r
+            ok += 1
+        if ok == 0:
+            return None
+        return pending, running
 
     def _decide(self, now: float, replicas: int) -> tuple[int | None, str]:
         cfg = self.cfg
@@ -70,20 +108,10 @@ class Controller:
         cfg = self.cfg
         now = time.monotonic()
 
-        try:
-            text = promscrape.fetch(cfg.prometheus_url, timeout=4.0)
-        except Exception as exc:  # noqa: BLE001 - transient scrape failures are expected
-            self.log.warning("scrape failed: %s", exc)
+        scraped = self._scrape_workers()
+        if scraped is None:
             return
-
-        pending = promscrape.sum_metric(text, cfg.metric_pending)
-        running = promscrape.sum_metric(text, cfg.metric_running)
-        if pending is None or running is None:
-            self.log.warning(
-                "metrics not found (pending=%s running=%s) — check METRIC_* names against %s",
-                cfg.metric_pending, cfg.metric_running, cfg.prometheus_url,
-            )
-            return
+        pending, running = scraped
 
         try:
             replicas = self.k8s.get_replicas()
@@ -124,10 +152,11 @@ class Controller:
     def run(self) -> None:
         self.log.info(
             "scaler up | deploy=%s ns=%s threads/worker=%d min=%d max=%d "
-            "up_window=%ds down_window=%ds cooldown=%ds dry_run=%s prom=%s",
+            "up_window=%ds down_window=%ds cooldown=%ds dry_run=%s selector=%r",
             self.cfg.worker_deployment_name, self.cfg.namespace, self.cfg.threads_per_worker,
             self.cfg.min_replicas, self.cfg.max_replicas, self.cfg.scale_up_window_s,
-            self.cfg.scale_down_window_s, self.cfg.cooldown_s, self.cfg.dry_run, self.cfg.prometheus_url,
+            self.cfg.scale_down_window_s, self.cfg.cooldown_s, self.cfg.dry_run,
+            self.cfg.prometheus_url or self.cfg.worker_label_selector,
         )
         while True:
             try:
@@ -143,7 +172,8 @@ def main() -> None:
         level=getattr(logging, cfg.log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
     )
-    Controller(cfg, WorkerScaleClient(cfg.namespace, cfg.worker_deployment_name)).run()
+    k8s = K8sClient(cfg.namespace, cfg.worker_deployment_name, cfg.worker_label_selector)
+    Controller(cfg, k8s).run()
 
 
 if __name__ == "__main__":

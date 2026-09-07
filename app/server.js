@@ -11,7 +11,7 @@ const path = require('path');
 const env = process.env;
 const CFG = {
   kestraBase: (env.KESTRA_BASE_URL || 'http://host.docker.internal:8080').replace(/\/$/, ''),
-  kestraMgmt: (env.KESTRA_MGMT_URL || 'http://host.docker.internal:8081').replace(/\/$/, ''),
+  kestraMgmt: (env.KESTRA_MGMT_URL || 'http://host.docker.internal:8082').replace(/\/$/, ''),
   tenant: env.KESTRA_TENANT || 'main',
   ns: env.FLOW_NAMESPACE || 'company.autoscaling',
   flow: env.FLOW_ID || 'webhook_sleep',

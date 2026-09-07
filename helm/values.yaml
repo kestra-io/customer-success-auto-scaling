@@ -1,24 +1,5 @@
 # Distributed Kestra for the auto-scaling example.
-#
-# Rendered by scripts/up.sh through a small sed pass (no envsubst dependency) that
-# substitutes ONLY the ${...} tokens below. This committed file contains NO
-# secrets — the image-pull secret is created imperatively by
-# scripts/create-secrets.sh; the license + internal secrets come from .env at
-# render time into the kestra-sensitive Secret.
-#
-# Trim of ../../infra/my-kestra/values.yaml with three deliberate changes:
-#   * basic auth ON with demo creds (${KESTRA_ADMIN_USER}) + matching super-admin.
-#     EE keeps an auth layer regardless of the OSS basicAuth flag, so we use known
-#     creds rather than fighting it. The webhook (URL-keyed) and :8081/prometheus
-#     stay anonymous; only the data/management API and the UI need the creds.
-#   * deployments.worker.workerThreads: 4      (deterministic concurrency ceiling)
-#   * dind.enabled: false                      (Sleep needs no runner; faster pods)
-#
-# IMPORTANT: the whole Kestra config lives in the kestra-sensitive Secret's
-# KESTRA_CONFIGURATION value, NOT in `configurations.application`. The image's
-# /app/kestra launcher, when KESTRA_CONFIGURATION is set, writes it to
-# /app/confs/application.yml and forces MICRONAUT_CONFIG_FILES to point there,
-# which would otherwise clobber the chart's own config file.
+
 
 image:
   repository: ${KESTRA_IMAGE_REPO}
@@ -32,36 +13,37 @@ deployments:
   standalone:
     enabled: false
 
+  indexer:
+    enabled: false
+
   webserver:
     enabled: true
     replicas: 1
     resources:
-      requests: { cpu: 300m, memory: 1536Mi }   # no limits: JVM headroom on a laptop
+      requests: { cpu: 300m, memory: 1200Mi }
+      limits:   { memory: 1792Mi }
 
   executor:
     enabled: true
     replicas: 1
     resources:
-      requests: { cpu: 250m, memory: 768Mi }
-
-  indexer:
-    enabled: true
-    replicas: 1
-    resources:
-      requests: { cpu: 150m, memory: 512Mi }
+      requests: { cpu: 250m, memory: 900Mi }
+      limits:   { memory: 1280Mi }
 
   scheduler:
     enabled: true
     replicas: 1
     resources:
-      requests: { cpu: 150m, memory: 512Mi }
+      requests: { cpu: 150m, memory: 700Mi }
+      limits:   { memory: 1024Mi }
 
   worker:
     enabled: true
     replicas: 1
     workerThreads: 4          # chart renders `--thread=4` on the worker process
     resources:
-      requests: { cpu: 250m, memory: 768Mi }
+      requests: { cpu: 250m, memory: 800Mi }
+      limits:   { memory: 1152Mi }
 
 # No container task runner in this demo — the Sleep task runs on a worker thread.
 dind:
@@ -78,10 +60,6 @@ service:
 ingress:
   enabled: false
 
-# The chart requires configurations.application to be non-empty, but at runtime
-# /app/kestra forces MICRONAUT_CONFIG_FILES to /app/confs/application.yml (built
-# from KESTRA_CONFIGURATION), so this stub is never actually read. The real
-# config is the KESTRA_CONFIGURATION value in the kestra-sensitive Secret below.
 configurations:
   application:
     kestra:
@@ -94,9 +72,6 @@ common:
         name: kestra-sensitive
 
 extraManifests:
-  # The COMPLETE Kestra configuration (rendered from .env at bring-up).
-  # /app/kestra writes this to /app/confs/application.yml and points
-  # MICRONAUT_CONFIG_FILES at it.
   - apiVersion: v1
     kind: Secret
     metadata:
@@ -207,3 +182,21 @@ extraManifests:
         app: kestra-postgres
       ports:
         - port: 5432
+
+  # Worker metrics are exposed only on each worker pod's own :8081 
+  #   no cross-service aggregation at webserver level.
+  # so we need a Service that selects the worker pods. The scaler scrapes worker
+  # pod IPs directly for an authoritative sum; this Service is what the host-side
+  # port-forward (and the trigger app's /stats readout) use.
+  - apiVersion: v1
+    kind: Service
+    metadata:
+      name: kestra-worker-metrics
+    spec:
+      selector:
+        app.kubernetes.io/name: kestra
+        app.kubernetes.io/component: worker
+      ports:
+        - name: management
+          port: 8081
+          targetPort: 8081

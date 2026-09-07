@@ -29,7 +29,13 @@ def _b(name: str, default: bool) -> bool:
 
 @dataclass(frozen=True)
 class Config:
+    # In EE the kestra_worker_job_* gauges live only on each worker pod's
+    # own :8081. The scaler lists worker pods by label and scrapes each one.
+    worker_label_selector: str
+    worker_metrics_port: int
+    # Optional: scrape this single URL instead of discovering pods (compose / tests).
     prometheus_url: str
+
     metric_pending: str
     metric_running: str
     metric_threads: str
@@ -55,10 +61,12 @@ class Config:
     def from_env(cls) -> "Config":
         ns = _s("NAMESPACE", "autoscaling")
         return cls(
-            prometheus_url=_s(
-                "PROMETHEUS_URL",
-                f"http://kestra.{ns}.svc:8081/prometheus",
+            worker_label_selector=_s(
+                "WORKER_LABEL_SELECTOR",
+                "app.kubernetes.io/name=kestra,app.kubernetes.io/component=worker",
             ),
+            worker_metrics_port=_i("WORKER_METRICS_PORT", 8081),
+            prometheus_url=_s("PROMETHEUS_URL", ""),
             metric_pending=_s("METRIC_PENDING", "kestra_worker_job_pending"),
             metric_running=_s("METRIC_RUNNING", "kestra_worker_job_running"),
             metric_threads=_s("METRIC_THREADS", "kestra_worker_job_thread"),
