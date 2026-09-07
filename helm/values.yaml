@@ -70,6 +70,15 @@ common:
   extraEnvFrom:
     - secretRef:
         name: kestra-sensitive
+  # First boot puts 4-5 JVMs on one node at once; v1.3.37 scans ~1840 plugins.
+  startupProbe:
+    httpGet:
+      path: /health
+      port: management
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 120
 
 extraManifests:
   - apiVersion: v1
