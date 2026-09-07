@@ -67,12 +67,15 @@ make up
 > image store produces an archive kind's `ctr import` rejects — so the node
 > pulls from the registry regardless.)
 
-Expected URLs:
+## Expected URLs
 
-- Kestra UI — <http://localhost:8080> (no login prompt — basic auth is off)
+**Kestra UI**: [http://localhost:8080](http://localhost:8080) (user: `admin@example.com`, password: `Autoscaling123`)
+
+**Trigger app**: [http://localhost:5173](http://localhost:5173)
+
+**Other URLs:**
 - Webhook — `http://localhost:8080/api/v1/main/executions/webhook/company.autoscaling/webhook_sleep/demo-key`
 - Prometheus — <http://localhost:8081/prometheus>
-- Trigger app — <http://localhost:5173>
 
 ## 4. Run the demo
 
