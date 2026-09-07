@@ -94,6 +94,17 @@ extraManifests:
             type: postgres
           queue:
             type: postgres
+          jdbc:
+            queues:
+              # Default poll-size is 100: one worker's subscriber leases a huge
+              # batch of taskruns into its local buffer and a second worker
+              # starves -> horizontal worker scaling adds no throughput. A small
+              # poll-size plus an always-aggressive poll interval (min == max, so
+              # an idle worker never backs off) makes the queue spread work
+              # evenly across every worker pod.
+              poll-size: 2
+              min-poll-interval: 20ms
+              max-poll-interval: 20ms
           storage:
             type: local
             local:

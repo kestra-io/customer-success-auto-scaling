@@ -29,14 +29,30 @@ skeleton the two solution workstreams are built out in.
 Prerequisites and the full walk-through are in [`SETUP.md`](./SETUP.md). Short version:
 
 ```bash
+# FILL REQUIRED ENV VARIABLES
+# copy the example environment file to .env
+# NOTES: fill in KESTRA_EE_LICENSE_* at minimum or switch to the OSS image (below)
 cp .env.example .env
-# fill in KESTRA_EE_LICENSE_* and the registry creds (or switch to the OSS image, see below)
+
+# login to the Kestra registry if using the EE image
 docker login registry.kestra.io          # EE image only
 
+# Start the demo. This will:
+# - create a kind cluster
+# - deploy Kestra with Helm
+# - import the workload flow
+# - start the trigger app
 make up          # kind cluster + Helm + flow import + trigger app; prints all URLs
+
+# Deploy Workstream 1 (Prometheus + worker scaling)
 make scaler      # deploy Workstream 1
 
-# open the trigger app, hit "Spike", watch:  kubectl get deploy -n autoscaling -w
+# TESTING: 
+# - open the trigger app: http://localhost:5173/
+# hit "Spike"
+# watch:  kubectl get deploy -n autoscaling -w
+
+# Tear down the demo
 make down
 ```
 
@@ -49,7 +65,7 @@ Set one value in `.env` and skip the registry login and license entirely:
 KESTRA_IMAGE=kestra/kestra:v1.3.24
 ```
 
-Behaviour is identical for the purposes of this demo.
+Behavior is identical for the purposes of this demo.
 
 ## Calibration at a glance
 
@@ -61,23 +77,19 @@ Behaviour is identical for the purposes of this demo.
 | **Baseline (default)** | **8 / min** | **2 (50 %)** | steady, queue empty |
 | Spike | 24 / min | 6 (150 %) | `pending` climbs → scaler adds a 2nd worker (capacity 8) → queue drains |
 
-## Security note
-
-For demo convenience `kestra.server.basicAuth.enabled: false`, so the UI, the
-webhook, and `/prometheus` are all open on localhost. **Never** run a real
-deployment this way.
 
 ## Layout
 
-```
-auto-scaling/
-├── README.md · PLAN.md · SETUP.md · Makefile · .env.example
-├── kind/cluster.yaml               kind cluster definition
-├── helm/values.yaml                distributed Kestra EE, worker replicas:1 threads:4
-├── flows/webhook_sleep.yaml        the workload flow
-├── scripts/                        bring-up / teardown / verification
-├── app/                            Node trigger app (slider + presets + /stats)
-├── compose/                        no-cluster quickstart
-├── workstream-1-prometheus-worker-scaling/
-└── workstream-2-flow-concurrency-limit/   (placeholder)
-```
+| Path | Description |
+|---|---|
+| `README.md`, `PLAN.md`, `SETUP.md` | Project overview, implementation plan, and step-by-step setup instructions |
+| `Makefile` | Commands for starting, testing, scaling, and tearing down the demo |
+| `.env.example` | Template for the environment variables required by the Kubernetes setup |
+| `kind/` | Kind cluster configuration used to run the demo locally |
+| `helm/` | Kestra Helm values, including the worker replica and thread settings |
+| `flows/` | The webhook-triggered workload flow used to create measurable demand |
+| `scripts/` | Shell scripts for provisioning, deployment, port forwarding, verification, and cleanup |
+| `app/` | Node.js trigger dashboard with rate controls, workload presets, and live metrics |
+| `compose/` | Docker Compose quickstart for exploring the workload without Kubernetes |
+| `workstream-1-prometheus-worker-scaling/` | Prometheus-driven controller that adjusts the Kestra worker Deployment |
+| `workstream-2-flow-concurrency-limit/` | Placeholder for the flow-level concurrency-limit approach |
