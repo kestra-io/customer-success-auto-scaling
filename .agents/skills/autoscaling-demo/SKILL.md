@@ -73,5 +73,5 @@ cd compose && docker compose down -v
 - **Scaler never acts** — check `kubectl auth can-i patch deployments/scale
   --as=system:serviceaccount:autoscaling:worker-scaler`; check `DRY_RUN`.
 - **Worker didn't get 4 threads** — `kubectl -n autoscaling get deploy
-  kestra-kestra-worker -o jsonpath='{.spec.template.spec.containers[0].command}'`
+  kestra-worker -o jsonpath='{.spec.template.spec.containers[0].command}'`
   should contain `--thread=4`.

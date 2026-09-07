@@ -44,7 +44,7 @@ Pseudocode and the reasoning are in `../PLAN.md`. The implementation is
 | `PROMETHEUS_URL` | `http://<webserver-svc>:8081/prometheus` | scrape target (set by `deploy-scaler.sh`) |
 | `METRIC_PENDING` / `METRIC_RUNNING` / `METRIC_THREADS` | `kestra_worker_job_pending` / `_running` / `_thread` | **verified at bring-up** by `scripts/verify-metrics.sh` → `.state/metric-names.env` |
 | `NAMESPACE` | `autoscaling` | namespace of the worker Deployment |
-| `WORKER_DEPLOYMENT_NAME` | `kestra-kestra-worker` | discovered from the `component=worker` label |
+| `WORKER_DEPLOYMENT_NAME` | `kestra-worker` | discovered from the `component=worker` label |
 | `THREADS_PER_WORKER` | `4` | must equal the Helm `workerThreads` |
 | `POLL_INTERVAL_SECONDS` | `15` | loop period |
 | `SCALE_UP_WINDOW_SECONDS` | `60` | how long `pending` must stay elevated |
@@ -65,7 +65,7 @@ All are set on the `worker-scaler-config` ConfigMap by
 ```bash
 make scaler                       # build + kind load + RBAC + ConfigMap + Deployment
 kubectl -n autoscaling logs -f deploy/worker-scaler
-kubectl -n autoscaling get deploy kestra-kestra-worker -w
+kubectl -n autoscaling get deploy kestra-worker -w
 ```
 
 Then drive load from the trigger app: **Spike** → scale up to 2; **Drop** →

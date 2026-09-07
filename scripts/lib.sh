@@ -42,6 +42,17 @@ preflight() {
 kctl() { kubectl --context "$KCTX" -n "$K8S_NAMESPACE" "$@"; }
 hlm()  { helm --kube-context "$KCTX" -n "$K8S_NAMESPACE" "$@"; }
 
+# Resolve chart resource names by label (the chart's fullname is release-name-
+# dependent: "kestra" when the release is called kestra, "<release>-kestra" otherwise).
+kestra_deploy() {  # kestra_deploy <component>
+  kctl get deploy -l "app.kubernetes.io/name=kestra,app.kubernetes.io/component=$1" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+}
+kestra_webserver_svc() {
+  kctl get svc -l "app.kubernetes.io/name=kestra,app.kubernetes.io/component=webserver" \
+    -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
+}
+
 # wait_for "<description>" <timeout-seconds> <command...>
 wait_for() {
   local desc="$1" timeout="$2"; shift 2

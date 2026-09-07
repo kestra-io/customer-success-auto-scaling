@@ -57,13 +57,13 @@ class Config:
         return cls(
             prometheus_url=_s(
                 "PROMETHEUS_URL",
-                f"http://kestra-kestra-webserver.{ns}.svc:8081/prometheus",
+                f"http://kestra.{ns}.svc:8081/prometheus",
             ),
             metric_pending=_s("METRIC_PENDING", "kestra_worker_job_pending"),
             metric_running=_s("METRIC_RUNNING", "kestra_worker_job_running"),
             metric_threads=_s("METRIC_THREADS", "kestra_worker_job_thread"),
             namespace=ns,
-            worker_deployment_name=_s("WORKER_DEPLOYMENT_NAME", "kestra-kestra-worker"),
+            worker_deployment_name=_s("WORKER_DEPLOYMENT_NAME", "kestra-worker"),
             threads_per_worker=_i("THREADS_PER_WORKER", 4),
             poll_interval_s=_i("POLL_INTERVAL_SECONDS", 15),
             scale_up_window_s=_i("SCALE_UP_WINDOW_SECONDS", 60),

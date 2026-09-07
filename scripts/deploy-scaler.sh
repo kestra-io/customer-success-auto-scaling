@@ -9,9 +9,12 @@ IMAGE="kestra-autoscaling/worker-scaler:local"
 # metric names discovered at bring-up (fall back to .env defaults)
 [[ -f "$STATE_DIR/metric-names.env" ]] && { set -a; source "$STATE_DIR/metric-names.env"; set +a; }
 
-WORKER_DEPLOYMENT_NAME="$(kctl get deploy -l app.kubernetes.io/component=worker -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "${HELM_RELEASE}-kestra-worker")"
-WEBSERVER_SVC="$(kctl get svc -l app.kubernetes.io/component=webserver -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || echo "${HELM_RELEASE}-kestra")"
+WORKER_DEPLOYMENT_NAME="$(kestra_deploy worker)"
+[[ -n "$WORKER_DEPLOYMENT_NAME" ]] || die "could not find the worker deployment by label"
+WEBSERVER_SVC="$(kestra_webserver_svc)"
+[[ -n "$WEBSERVER_SVC" ]] || die "could not find the webserver service by label"
 PROM_URL="http://${WEBSERVER_SVC}.${K8S_NAMESPACE}.svc:8081/prometheus"
+log "worker deployment: ${WORKER_DEPLOYMENT_NAME}   prometheus: ${PROM_URL}"
 
 log "build $IMAGE"
 docker build -t "$IMAGE" "$WS1"

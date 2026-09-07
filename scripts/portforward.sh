@@ -7,11 +7,13 @@ load_env
 PID_FILE="$STATE_DIR/portforward.pid"
 
 svc_name() {
-  # Prefer an explicit webserver service; fall back to the release service.
-  for s in "${HELM_RELEASE}-kestra-webserver" "${HELM_RELEASE}-kestra"; do
+  # The webserver service carries component=webserver and exposes 8080 + 8081.
+  local s
+  s="$(kestra_webserver_svc)"
+  [[ -n "$s" ]] && { echo "$s"; return; }
+  for s in "$HELM_RELEASE" "${HELM_RELEASE}-kestra" "${HELM_RELEASE}-webserver" "${HELM_RELEASE}-kestra-webserver"; do
     kctl get "svc/$s" >/dev/null 2>&1 && { echo "$s"; return; }
   done
-  kctl get svc -l app.kubernetes.io/name=kestra -o jsonpath='{.items[0].metadata.name}' 2>/dev/null
 }
 
 start() {
