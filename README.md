@@ -62,7 +62,7 @@ This example uses **no** Enterprise-only features (no worker groups, no EE RBAC)
 Set one value in `.env` and skip the registry login and license entirely:
 
 ```bash
-KESTRA_IMAGE=kestra/kestra:v1.3.24
+KESTRA_IMAGE=kestra/kestra:v1.3.37
 ```
 
 Behavior is identical for the purposes of this demo.
