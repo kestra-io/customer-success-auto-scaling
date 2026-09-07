@@ -57,8 +57,6 @@ make up
 11. prints the URLs.
 
 > **Helm repo URL:** the `kestra-kubectl` skill uses `https://helm.kestra.io/`.
-> An older file in this repo used `https://charts.kestra.io`. If step 4 fails,
-> switch `HELM_REPO_URL` in `.env` to the other one.
 
 > **Slow first run:** the EE image is large. To pre-warm:
 > `docker pull $KESTRA_IMAGE && kind load docker-image $KESTRA_IMAGE --name $KIND_CLUSTER_NAME`
@@ -121,14 +119,3 @@ docker compose up --build
 
 See `compose/README.md` for exactly what this does and does not demonstrate
 (it does **not** do live Kubernetes worker scaling).
-
-## 8. Graduating this initiative to its own repo
-
-Per the workspace `AGENTS.md` graduation rule, each initiative is its own
-standalone git repo. When ready:
-
-```bash
-cd initiatives/auto-scaling
-git init && git add -A && git commit -m "Initial commit: auto-scaling example"
-printf '\ninitiatives/auto-scaling\n' >> ../../.gitignore
-```
