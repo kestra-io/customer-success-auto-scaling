@@ -28,9 +28,12 @@ for m in serviceaccount role rolebinding; do
 done
 
 log "verify the ServiceAccount can scale the worker Deployment"
-kctl auth can-i patch deployments/scale \
-  --as="system:serviceaccount:${K8S_NAMESPACE}:worker-scaler" >/dev/null \
-  && ok "RBAC ok" || warn "RBAC check returned non-yes — the scaler may not be able to patch"
+if kctl auth can-i patch deployments --subresource=scale \
+     --as="system:serviceaccount:${K8S_NAMESPACE}:worker-scaler" >/dev/null; then
+  ok "RBAC ok (can patch deployments/scale)"
+else
+  warn "RBAC check returned non-yes — the scaler may not be able to patch deployments/scale"
+fi
 
 log "render + apply scaler config"
 kctl create configmap worker-scaler-config \
