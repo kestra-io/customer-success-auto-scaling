@@ -1,0 +1,62 @@
+id: localstack-sqs-pod-admission-parent
+namespace: demo
+
+description: |
+  LocalStack SQS variant of the pod-admission parent. It uses the same two KV
+  values written by sqs-pod-admission-controller:
+    sqs_pod_admission_enabled
+    sqs_pod_admission_size
+
+  The LocalStack service/queue settings matches defaults according to the underlying 
+  deployment in the helm chart extra manifests. Change the service namespace or queue
+  path below if the LocalStack manifest/script was deployed with different values.
+
+inputs:
+  - id: sleep_seconds
+    type: INT
+    defaults: 20
+  - id: cpu_request
+    type: STRING
+    defaults: "50m"
+  - id: memory_request
+    type: STRING
+    defaults: "64M"
+
+tasks:
+  - id: fan_out_messages
+    type: io.kestra.plugin.core.flow.ForEachItem
+    items: "{{ trigger.uri }}"
+    batch:
+      rows: 1
+    namespace: demo
+    flowId: sqs-pod-admission-child
+    wait: true
+    transmitFailed: true
+    labels:
+      workload: localstack-sqs-pod-admission-test
+      admission-batch: "{{ execution.id }}"
+    inputs:
+      message: "{{ taskrun.items }}"
+      parent_execution_id: "{{ execution.id }}"
+      sleep_seconds: "{{ inputs.sleep_seconds }}"
+      cpu_request: "{{ inputs.cpu_request }}"
+      memory_request: "{{ inputs.memory_request }}"
+
+triggers:
+  - id: localstack_sqs_poll
+    type: io.kestra.plugin.aws.sqs.Trigger
+    endpointOverride: http://localstack-sqs.hpgrahsl-dev.svc.cluster.local:4566
+    region: us-east-1
+    accessKeyId: test
+    secretKeyId: test
+    queueUrl: http://localstack-sqs.hpgrahsl-dev.svc.cluster.local:4566/queue/us-east-1/000000000000/kestra-pod-admission-test
+    serdeType: STRING
+    interval: PT5S
+    allowConcurrent: false
+    maxRecords: "{{ kv('sqs_pod_admission_size') }}"
+    maxDuration: PT30S
+    autoDelete: true
+    visibilityTimeout: 300
+    conditions:
+      - type: io.kestra.plugin.core.condition.Expression
+        expression: "{{ kv('sqs_pod_admission_enabled') == true or kv('sqs_pod_admission_enabled') == 'true' }}"

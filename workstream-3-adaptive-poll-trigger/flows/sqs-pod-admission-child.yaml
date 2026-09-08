@@ -1,0 +1,57 @@
+id: sqs-pod-admission-child
+namespace: demo
+
+description: |
+  One admitted item from sqs-pod-admission-parent. This flow deliberately
+  has exactly one PodCreate task, so one non-terminal child execution represents
+  one reserved workload slot for the pod-admission experiment.
+
+inputs:
+  - id: message
+    type: FILE
+  - id: parent_execution_id
+    type: STRING
+  - id: sleep_seconds
+    type: INT
+    defaults: 15
+  - id: cpu_request
+    type: STRING
+    defaults: "50m"
+  - id: memory_request
+    type: STRING
+    defaults: "64M"
+
+tasks:
+  - id: log_message
+    type: io.kestra.plugin.core.log.Log
+    message: "Processing one SQS item from parent {{ inputs.parent_execution_id }}: {{ read(inputs.message) }}"
+
+  - id: hold_capacity
+    type: io.kestra.plugin.kubernetes.core.PodCreate
+    namespace: hpgrahsl-dev
+    metadata:
+      labels:
+        app: kestra-sqs-test
+        app.kubernetes.io/part-of: kestra-sqs-test
+        app.kubernetes.io/name: hold-capacity
+        app.kubernetes.io/instance: "{{ execution.id }}"
+        workload.example/admission-batch: "{{ inputs.parent_execution_id }}"
+        workload.example/child-execution: "{{ execution.id }}"
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: hold-capacity
+          image: alpine:3.20
+          command: ["sh", "-c", "echo started $(date); sleep {{ inputs.sleep_seconds }}"]
+          resources:
+            requests:
+              cpu: "{{ inputs.cpu_request }}"
+              memory: "{{ inputs.memory_request }}"
+            limits:
+              cpu: "{{ inputs.cpu_request }}"
+              memory: "{{ inputs.memory_request }}"
+    waitRunning: PT2M
+    waitUntilRunning: PT2M
+    waitForLogInterval: PT5S
+    delete: true
+    resume: false
