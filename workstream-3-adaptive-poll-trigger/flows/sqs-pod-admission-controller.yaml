@@ -1,0 +1,106 @@
+id: sqs-pod-admission-controller
+namespace: demo
+
+description: |
+  Safe controller-flow harness for the SQS pod-admission experiment.
+
+  It implements the important write order: close intake, write a positive batch
+  size, then open intake only when the calculated grant is positive. It queries
+  non-terminal child executions from Kestra directly and reads available
+  capacity from the sqs_pod_admission_slots_available KV entry, a manual
+  stand-in for the future Kubernetes Ready-node capacity calculation. Adjust
+  that KV value at runtime to mimic adding or removing cluster capacity; a
+  missing or non-numeric value is treated as 0 so the controller fails closed.
+  Disable it, run it manually first to validate the query and KV behavior before enabling the schedule.
+
+  Scope is deliberately limited to sqs-pod-admission-parent/child and its
+  sqs_pod_admission_* KV keys. It must not be shared with another resource
+  profile without separate capacity accounting.
+
+concurrency:
+  limit: 1
+  behavior: CANCEL
+
+inputs:
+  # Desired additional admission above available capacity, used deliberately to
+  # create bounded pod Pending demand for Karpenter.
+  - id: desired_pending_overflow_slots
+    type: INT
+    defaults: 0
+
+tasks:
+  # Fail closed before changing the batch size. A polling evaluation already in
+  # progress cannot be revoked; this only prevents later eligible evaluations.
+  - id: close_intake
+    type: io.kestra.plugin.core.kv.Set
+    key: sqs_pod_admission_enabled
+    value: "false"
+    kvType: BOOLEAN
+
+  # Count ForEachItem-created child executions of the dedicated flow.
+  # Uses the API's IN operator to match non-terminal states.
+  # QUEUED children are counted as reservations before they reach PodCreate.
+  - id: query_active_children
+    type: io.kestra.plugin.core.http.Request
+    uri: http://my-kestra-ee.hpgrahsl-dev.svc.cluster.local:8080/api/v1/default/executions/search
+    method: GET
+    params:
+      "filters[namespace][EQUALS]": demo
+      "filters[flowId][EQUALS]": sqs-pod-admission-child
+      "filters[state][IN]": CREATED,SUBMITTED,RUNNING,PAUSED,RESTARTED,KILLING,QUEUED,RETRYING,BREAKPOINT
+      childFilter: CHILD
+    options:
+      auth:
+        type: BASIC
+        username: "demo-ee@kestra.io"
+        password: "ChangeMe#1234"
+
+  # Available capacity is read from the sqs_pod_admission_slots_available KV
+  # entry: a manual stand-in until a verified Kubernetes Ready-node capacity
+  # source replaces it. errorOnMissing=false so an unset key renders empty; the
+  # shell guard then treats a missing or non-numeric value as 0 (fail closed).
+  # This flow does not use Kubernetes pod count for logical admission accounting.
+  - id: calculate_grant
+    type: io.kestra.plugin.scripts.shell.Commands
+    taskRunner:
+      type: io.kestra.plugin.core.runner.Process
+    env:
+      SLOTS_AVAILABLE: "{{ kv('sqs_pod_admission_slots_available', errorOnMissing=false) }}"
+      OVERFLOW_SLOTS: "{{ inputs.desired_pending_overflow_slots }}"
+      ACTIVE_CHILDREN: "{{ fromJson(outputs.query_active_children.body).total }}"
+    commands:
+      - |
+        slots_available="$SLOTS_AVAILABLE"
+        case "$slots_available" in ''|*[!0-9]*) slots_available=0 ;; esac
+        grant=$(( slots_available + OVERFLOW_SLOTS - ACTIVE_CHILDREN ))
+        if [ "$grant" -lt 0 ]; then grant=0; fi
+        echo "::{\"outputs\":{\"grant\":$grant}}::"
+
+  # Keep a positive value even while intake is closed. maxRecords=0 is unsafe
+  # for the current SQS Consume implementation; enabled=false is the intake
+  # barrier.
+  - id: set_batch_size
+    type: io.kestra.plugin.core.kv.Set
+    key: sqs_pod_admission_size
+    value: "{{ outputs.calculate_grant.vars.grant > 0 ? outputs.calculate_grant.vars.grant : 1 }}"
+    kvType: NUMBER
+
+  - id: open_intake_when_granted
+    type: io.kestra.plugin.core.kv.Set
+    runIf: "{{ outputs.calculate_grant.vars.grant > 0 }}"
+    key: sqs_pod_admission_enabled
+    value: "true"
+    kvType: BOOLEAN
+
+triggers:
+  - id: reconcile
+    type: io.kestra.plugin.core.trigger.Schedule
+    # Enable only after the manual sqs_pod_admission_slots_available KV stand-in
+    # has been replaced with real, failure-checked Kubernetes capacity reads.
+    disabled: false
+    # Explicit even though false is the default: one controller reconciliation
+    # at a time; later schedule ticks are skipped while one is active.
+    allowConcurrent: false
+    cron: "*/5 * * * * *"
+    withSeconds: true
+    recoverMissedSchedules: NONE
